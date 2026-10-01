@@ -19,6 +19,7 @@ mod look;
 mod procs;
 mod settings;
 mod tools;
+mod update;
 #[cfg(windows)]
 mod alt_click;
 #[cfg(target_os = "macos")]
@@ -1043,9 +1044,9 @@ fn report_error(app: &AppHandle, error: String, elapsed_ms: u128) {
 }
 
 #[derive(Clone, Serialize)]
-struct Notice {
-    title: String,
-    body: String,
+pub(crate) struct Notice {
+    pub(crate) title: String,
+    pub(crate) body: String,
 }
 
 // ---------- windows ----------
@@ -1116,9 +1117,14 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
+        .manage(update::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             hotkey_status,
+            update::update_check,
+            update::update_status,
+            update::update_install,
             permissions_get,
             permissions_request,
             settings_get,
@@ -1236,6 +1242,7 @@ pub fn run() {
                     show_settings(app.handle(), Some("permissions"));
                 }
             }
+            update::start_background_checks(app.handle());
             log::info!("Convertino started");
             Ok(())
         })

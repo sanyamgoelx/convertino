@@ -1,0 +1,74 @@
+# Publishes a release when a version tag is pushed (release.cmd does that):
+# builds Windows and both Macs, uploads the installers to a GitHub Release,
+# and writes latest.json, which installed copies read to update themselves.
+# Everything is signed for the updater with TAURI_SIGNING_PRIVATE_KEY
+# (set up once by release-setup.cmd).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+          - name: macos-apple-silicon
+            os: macos-14
+          - name: macos-intel
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install JS dependencies
+        run: npm install
+
+      - name: Bundle the Mac converters
+        if: runner.os == 'macOS'
+        run: bash ci/bundle-mac-tools.sh src-tauri/mac-tools
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Convertino ${{ github.ref_name }}"
+          releaseBody: |
+            Convert any file from a radial wheel: select files in File Explorer or Finder (or in any app's Open/Save window), press **Ctrl+Alt+Shift+C** (⌃⌥⇧C on Mac) or Alt/Option-right-click, and pick a format.
+
+            **Which file do I download?**
+            - Windows: `Convertino_…_x64-setup.exe`
+            - Mac with Apple silicon (M1 and later): `Convertino_…_aarch64.dmg`
+            - Mac with Intel: `Convertino_…_x64.dmg`
+
+            Installed copies update themselves from here (Settings › About).
+
+            **First launch:** Windows may say "Windows protected your PC": click *More info* › *Run anyway*. On a Mac, open System Settings › Privacy & Security and click *Open Anyway* once. Full steps in the README.
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true
+          args: ${{ runner.os == 'macOS' && '--bundles app,dmg' || '' }}

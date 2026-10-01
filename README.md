@@ -16,6 +16,28 @@ two permissions macOS needs. Open/Save dialogs come next.
 - [Build plan](docs/BUILD-PLAN.md)
 - [Interactive wheel mockup](docs/wheel-mockup.html) (download and open in a browser)
 
+## Download
+
+Get the latest version from **[Releases](https://github.com/sanyamgoelx/convertino/releases/latest)**:
+
+- Windows 10/11: `Convertino_…_x64-setup.exe`
+- Mac with Apple silicon (M1 and later): `Convertino_…_aarch64.dmg`
+- Mac with Intel: `Convertino_…_x64.dmg`
+
+Installed copies update themselves (Settings › About). The first time, Windows may
+show "Windows protected your PC": click **More info › Run anyway** (the installer
+isn't code-signed yet; see `docs/SIGNING.md`).
+
+## Making a release (maintainers)
+
+1. Once: double-click **`release-setup.cmd`**. It makes the key that signs updates,
+   stores it in `%USERPROFILE%\.convertino` (back that folder up), and gives it to
+   GitHub as Actions secrets.
+2. Each release: raise `version` in `src-tauri/tauri.conf.json` (and `package.json`,
+   `src-tauri/Cargo.toml`), then double-click **`release.cmd`**. It pushes the code and
+   the tag `v<version>`; GitHub builds Windows and both Macs and publishes the release
+   with `latest.json` for the updater.
+
 ## Try the spike
 
 1. Run the app (see below).

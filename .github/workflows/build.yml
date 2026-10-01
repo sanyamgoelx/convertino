@@ -70,12 +70,18 @@ jobs:
 
       - name: Build app and installers (Windows)
         if: runner.os == 'Windows'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build
 
       - name: Build app and installers (Mac)
         if: runner.os == 'macOS'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          npx tauri build --bundles app,dmg --config '{"bundle":{"resources":{"mac-tools/":"tools/"}}}'
+          npx tauri build --bundles app,dmg
           app=$(ls -d src-tauri/target/release/bundle/macos/*.app)
           echo "Converters inside the app:"
           ls "$app/Contents/Resources/tools"

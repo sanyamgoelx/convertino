@@ -592,6 +592,51 @@ $("licences-close").addEventListener("click", () => $("licences").close());
 $("open-logs").addEventListener("click", () => invoke("open_logs").catch((e) => toast(String(e))));
 $("show-activity").addEventListener("click", () => invoke("show_activity").catch(() => {}));
 
+// Updates (Settings > About).
+let update = null;
+let updating = false;
+function renderUpdate() {
+  const sub = $("update-sub"), btn = $("update-btn");
+  if (!update) return;
+  if (updating) return;
+  if (update.dev) {
+    sub.textContent = `Version ${update.current} · development builds don't update`;
+    btn.disabled = true;
+  } else if (update.available) {
+    sub.textContent = `Convertino ${update.available} is ready (you have ${update.current}). Convertino restarts on the new version.`;
+    btn.textContent = "Update and restart";
+    btn.classList.add("primary");
+    btn.disabled = false;
+  } else {
+    sub.textContent = `You have the latest version (${update.current}). Checked automatically once a day.`;
+    btn.textContent = "Check now";
+    btn.classList.remove("primary");
+    btn.disabled = false;
+  }
+}
+async function loadUpdate() {
+  try { update = await invoke("update_status"); } catch (e) { return; }
+  renderUpdate();
+}
+$("update-btn").addEventListener("click", async () => {
+  const btn = $("update-btn"), sub = $("update-sub");
+  if (update && update.available) {
+    updating = true;
+    btn.disabled = true;
+    sub.textContent = "Downloading the update…";
+    try { await invoke("update_install"); } catch (e) { updating = false; toast(String(e)); loadUpdate(); }
+    return;
+  }
+  btn.disabled = true;
+  sub.textContent = "Checking…";
+  try { update = await invoke("update_check"); } catch (e) { toast(String(e)); }
+  btn.disabled = false;
+  renderUpdate();
+});
+if (tauri) {
+  tauri.event.listen("update-progress", (e) => { $("update-sub").textContent = e.payload.detail; });
+}
+
 function toast(text) {
   const t = document.createElement("div");
   t.className = "toast";
@@ -607,6 +652,7 @@ async function load() {
   view = await invoke("settings_get");
   render();
   refreshPerms();
+  loadUpdate();
 }
 
 if (tauri) {
@@ -633,6 +679,7 @@ load().then(() => setPage(page));
 // ---------- in a plain browser: sample data, for checking the design ----------
 
 function demoInvoke(cmd, args) {
+  if (cmd === "update_status" || cmd === "update_check") return Promise.resolve({ current: "0.1.0", available: new URLSearchParams(location.search).get("update"), notes: null, dev: false });
   if (cmd === "permissions_get") return Promise.resolve({ mac: true, accessibility: true, altClickOn: true, finder: "not-asked" });
   if (cmd === "permissions_request") return Promise.resolve(null);
   const d = (window.__demo = window.__demo || {
