@@ -1,29 +1,46 @@
 # Puts Convertino on GitHub as a public repository (one time), then pushes.
-# Sign-in happens in your browser through Git Credential Manager; no password is typed here.
-$ErrorActionPreference = "Continue"  # git writes progress to stderr
+# Sign-in uses the GitHub CLI: it shows a one-time code and opens github.com in your browser.
+# No password is typed here, and the sign-in stays on this PC.
+$ErrorActionPreference = "Continue"  # git and gh write progress to stderr
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $log = Join-Path (Get-Location) "github.log"
 function Say($m) { Write-Host $m; Add-Content -Path $log -Value $m -Encoding utf8 }
 "Convertino GitHub $(Get-Date -Format s)" | Set-Content -Path $log -Encoding utf8
+$env:GIT_TERMINAL_PROMPT = "0"
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Say "Git isn't installed. Run setup-windows.cmd first."; exit 1 }
 
-$user = (git config --global github.user) 2>$null
-if (-not $user) {
-  Write-Host ""
-  $user = Read-Host "Your GitHub user name"
-  $user = $user.Trim()
-  if (-not $user) { Say "No user name given."; exit 1 }
-  git config --global github.user $user
+# GitHub CLI: installed with winget the first time.
+function Find-Gh {
+  $c = Get-Command gh -ErrorAction SilentlyContinue
+  if ($c) { return $c.Source }
+  foreach ($p in @("$env:ProgramFiles\GitHub CLI\gh.exe", "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe")) { if (Test-Path $p) { return $p } }
+  return $null
 }
-Say "GitHub user: $user"
+$gh = Find-Gh
+if (-not $gh) {
+  Say "Installing the GitHub CLI (free, from Microsoft's winget)..."
+  winget install --id GitHub.cli -e --silent --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object { Say "  $_" }
+  $gh = Find-Gh
+  if (-not $gh) { Say "The GitHub CLI didn't install. Install it from https://cli.github.com and run this again."; exit 1 }
+}
+Say "GitHub CLI: $gh"
 
-if (-not (Test-Path ".git")) {
-  git init -b main | Out-Null
-  Say "Made a git repository here."
+& $gh auth status --hostname github.com *> $null
+if ($LASTEXITCODE -ne 0) {
+  Write-Host ""
+  Write-Host "Signing in to GitHub: copy the one-time code shown below, press Enter,"
+  Write-Host "and paste it in the browser page that opens."
+  & $gh auth login --hostname github.com --git-protocol https --web
+  if ($LASTEXITCODE -ne 0) { Say "GitHub sign-in didn't finish."; exit 1 }
 }
-# Commits show your GitHub private address, not your real e-mail, unless you've set one yourself.
+& $gh auth setup-git --hostname github.com | Out-Null
+$user = (& $gh api user --jq .login).Trim()
+Say "Signed in as: $user"
+git config --global github.user $user
+
+if (-not (Test-Path ".git")) { git init -b main | Out-Null; Say "Made a git repository here." }
 if (-not (git config user.name)) { git config user.name $user }
 if (-not (git config user.email)) { git config user.email "$user@users.noreply.github.com" }
 git config core.autocrlf true
@@ -31,25 +48,21 @@ git config core.autocrlf true
 git add -A
 $pending = git status --porcelain
 if ($pending) {
-  git commit -q -m "Convertino: wheel, conversions, PDF editor, Settings, smallest-file search" | Out-Null
+  git commit -q -m "Convertino: latest changes" | Out-Null
   Say "Committed $(@($pending).Count) file(s)."
 }
 
 $url = "https://github.com/$user/convertino.git"
-if (-not (git remote 2>$null | Select-String -SimpleMatch "origin")) { git remote add origin $url }
+if (git remote 2>$null | Select-String -SimpleMatch "origin") { git remote set-url origin $url } else { git remote add origin $url }
 
-# Does the repository exist yet?
-$exists = $true
-try { Invoke-WebRequest -UseBasicParsing -Method Head "https://github.com/$user/convertino" | Out-Null } catch { $exists = $false }
-if (-not $exists) {
-  Write-Host ""
-  Write-Host "Opening GitHub to create the repository. Keep the name 'convertino', choose Public,"
-  Write-Host "leave README / .gitignore / licence unticked, and click 'Create repository'."
-  Start-Process "https://github.com/new?name=convertino&visibility=public&description=Convert%20any%20file%20from%20a%20radial%20wheel%20in%20Explorer%20or%20Finder"
-  Read-Host "Press Enter here once it's created"
+& $gh repo view "$user/convertino" *> $null
+if ($LASTEXITCODE -ne 0) {
+  Say "Creating the public repository $user/convertino..."
+  & $gh repo create "$user/convertino" --public --description "Convert any file from a radial wheel in Explorer or Finder" 2>&1 | ForEach-Object { Say "  $_" }
+  if ($LASTEXITCODE -ne 0) { Say "COULDN'T CREATE THE REPOSITORY"; exit 1 }
 }
 
-Say "Pushing to $url (a browser window may ask you to sign in to GitHub the first time)..."
+Say "Pushing to $url ..."
 git push -u origin main 2>&1 | ForEach-Object { Say "$_" }
 if ($LASTEXITCODE -ne 0) { Say "PUSH FAILED (exit $LASTEXITCODE)"; exit $LASTEXITCODE }
 Say "PUSHED: https://github.com/$user/convertino"
