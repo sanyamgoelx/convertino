@@ -42,5 +42,6 @@ pub fn current_selection() -> Result<Selection, String> {
     Ok(Selection {
         source: "Finder".into(),
         paths,
+        ..Default::default()
     })
 }

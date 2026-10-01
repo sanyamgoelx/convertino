@@ -151,6 +151,9 @@ pub struct WheelModel {
     pub ring: bool,
     pub handoff_ms: u64,
     pub quality: Quality,
+    /// A Save dialog whose file the conversion waits for (see selection::Selection).
+    #[serde(skip)]
+    pub pending_dialog: Option<isize>,
 }
 
 fn human_size(bytes: u64) -> String {
@@ -373,6 +376,7 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         ring: prefs.progress_ring,
         handoff_ms: prefs.handoff_seconds as u64 * 1000,
         quality: prefs.quality.clone(),
+        pending_dialog: None,
     })
 }
 

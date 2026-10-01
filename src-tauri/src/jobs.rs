@@ -93,6 +93,7 @@ pub fn start(
     files: Vec<PathBuf>,
     ring: bool,
     quality: Option<crate::settings::Quality>,
+    wait_for_dialog: Option<isize>,
 ) -> u64 {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     std::thread::spawn(move || {
@@ -106,6 +107,21 @@ pub fn start(
             crate::show_hud(&app);
         }
         emit(&app, "job-started", Started { id, title, family, ring });
+
+        // From a Save dialog: the app hasn't written the file yet.
+        if let Some(dialog) = wait_for_dialog {
+            if let Err(reason) = wait_for_save(&app, id, dialog, &files) {
+                let cancelled = reason == crate::procs::CANCELLED;
+                emit(&app, "job-done", Done {
+                    id,
+                    ok: false,
+                    title: if cancelled { "Cancelled".into() } else { "Nothing was saved".into() },
+                    body: if cancelled { "Nothing was converted.".into() } else { reason },
+                    can_undo: false,
+                });
+                return;
+            }
+        }
 
         let quality = quality.unwrap_or_else(|| crate::settings::get().quality);
         let steps = match convert::plan_with(&target_id, &files, &quality) {
@@ -168,6 +184,49 @@ pub fn start(
         emit(&app, "job-done", done);
     });
     id
+}
+
+/// Longest wait for a Save dialog to be used.
+const SAVE_WAIT: Duration = Duration::from_secs(15 * 60);
+
+/// Waits until the Save dialog has closed and its file exists and has stopped
+/// growing (the app may still be writing it).
+fn wait_for_save(app: &AppHandle, id: u64, dialog: isize, files: &[PathBuf]) -> Result<(), String> {
+    let started = Instant::now();
+    let mut closed_at: Option<Instant> = None;
+    let mut last: Option<(u64, Instant)> = None;
+    let mut told = false;
+    loop {
+        if crate::procs::is_cancelled(id) {
+            return Err(crate::procs::CANCELLED.into());
+        }
+        if !told {
+            emit(app, "job-progress", Progress { id, fraction: 0.0, detail: "Waiting for you to save…".into() });
+            told = true;
+        }
+        let open = crate::selection::window_open(dialog);
+        if !open && closed_at.is_none() {
+            closed_at = Some(Instant::now());
+        }
+        let size: Option<u64> = files.iter().map(|f| f.metadata().ok().map(|m| m.len())).sum();
+        match (size, last) {
+            // Same size for a second after the dialog closed: done writing.
+            (Some(s), Some((before, since))) if s == before && s > 0 && !open && since.elapsed() >= Duration::from_secs(1) => {
+                return Ok(());
+            }
+            (Some(s), Some((before, _))) if s == before => {}
+            (Some(s), _) => last = Some((s, Instant::now())),
+            (None, _) => last = None,
+        }
+        // Closed without the file appearing within a minute: Save was cancelled.
+        if size.is_none() && closed_at.is_some_and(|t| t.elapsed() > Duration::from_secs(60)) {
+            return Err("The file wasn't saved, so there was nothing to convert.".into());
+        }
+        if started.elapsed() > SAVE_WAIT {
+            return Err("Convertino stopped waiting for the file to be saved.".into());
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
 }
 
 /// A file saved by the PDF editor: shown as a done card with Open folder and Undo.

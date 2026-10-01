@@ -156,7 +156,7 @@ fn wheel_pick(
     if target_id == "pdf.edit" {
         hide_wheel(&app);
         let first = state.wheel.lock().ok().and_then(|w| w.clone()).and_then(|m| m.files.into_iter().find(|f| f.family == "pdf"));
-        if let Some(f) = first {
+        if let Some(f) = first.filter(|f| std::path::Path::new(&f.path).is_file()) {
             open_editor(&app, PathBuf::from(f.path));
         }
         return 0;
@@ -190,7 +190,8 @@ fn wheel_pick(
         hide_wheel(&app);
     }
     let files = files.into_iter().map(std::path::PathBuf::from).collect();
-    let id = jobs::start(app, target_id, label, family, files, ring, quality.map(|q| q.clamped()));
+    let pending = state.wheel.lock().ok().and_then(|w| w.as_ref().and_then(|m| m.pending_dialog));
+    let id = jobs::start(app, target_id, label, family, files, ring, quality.map(|q| q.clamped()), pending);
     if ring {
         if let Ok(mut r) = state.ring.lock() {
             *r = Some(id);
@@ -902,7 +903,7 @@ fn on_option_click(app: &AppHandle, x: f64, y: f64) {
     let under = mac::item_at(x, y).map(|p| p.to_string_lossy().into_owned());
     let selection = match (selection, under) {
         (Ok(sel), Some(item)) if sel.paths.iter().any(|p| p.trim_end_matches('/') == item.trim_end_matches('/')) => Ok(sel),
-        (_, Some(item)) => Ok(selection::Selection { source: "Finder".into(), paths: vec![item] }),
+        (_, Some(item)) => Ok(selection::Selection { source: "Finder".into(), paths: vec![item], ..Default::default() }),
         (sel, None) => {
             log::info!("option-click: no item found under the pointer; using Finder's selection");
             sel
@@ -977,8 +978,10 @@ fn open_for_selection(
         let app = app.clone();
         let elapsed_ms = started.elapsed().as_millis();
 
+        let pending_dialog;
         let paths = match selection {
             Ok(sel) => {
+                pending_dialog = sel.pending_dialog;
                 log::info!("{trigger}: {} item(s) from {} in {elapsed_ms} ms", sel.paths.len(), sel.source);
                 for p in &sel.paths {
                     log::info!("  {p}");
@@ -1004,7 +1007,12 @@ fn open_for_selection(
         };
 
         match wheel::build(&paths, accent::system_accent()) {
-            Ok(model) => {
+            Ok(mut model) => {
+                if pending_dialog.is_some() {
+                    // Converts the file the app is about to save.
+                    model.pending_dialog = pending_dialog;
+                    model.hub_subtitle = "Converts after you click Save".into();
+                }
                 let app2 = app.clone();
                 // Window work must happen on the main thread.
                 let _ = app.run_on_main_thread(move || open_wheel(&app2, model, cursor));

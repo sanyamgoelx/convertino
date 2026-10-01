@@ -512,7 +512,7 @@ fn ssim_as_vmaf(ssim: f64) -> f64 {
 /// Where the samples come from: (start, length) in seconds.
 fn sample_spans(duration: Option<f64>) -> Vec<(f64, f64)> {
     match duration {
-        Some(d) if d > 18.0 => [0.15, 0.5, 0.8].iter().map(|f| ((d * f - 1.5).max(0.0), 3.0)).collect(),
+        Some(d) if d > 18.0 => [0.15, 0.5, 0.8].iter().map(|f| ((d * f - 1.0).max(0.0), 2.0)).collect(),
         // Short clips: 4 seconds from the middle is plenty.
         Some(d) if d > 4.0 => vec![(d / 2.0 - 2.0, 4.0)],
         Some(d) if d > 0.0 => vec![(0.0, d)],
@@ -614,15 +614,26 @@ fn parse_score(text: &str) -> Option<f64> {
 /// trials (a secant search: the look changes about evenly with the setting).
 /// Returns the trial at that setting, or the best-looking one tried.
 #[allow(clippy::too_many_arguments)]
-fn search(input: &Path, p: &Probe, enc: &'static str, q: Quality, target: f64, scale_to: Option<u32>, spans: &[(f64, f64)], dir: &Path) -> Result<Trial, String> {
+fn search(
+    input: &Path,
+    p: &Probe,
+    enc: &'static str,
+    q: Quality,
+    target: f64,
+    scale_to: Option<u32>,
+    spans: &[(f64, f64)],
+    dir: &Path,
+    progress: &mut dyn FnMut(f64),
+) -> Result<Trial, String> {
     let (lo, hi) = knob_range(enc).ok_or("no quality setting")?;
     let mut tried: Vec<Trial> = Vec::new();
     let mut v = default_knob(enc, q).clamp(lo, hi);
-    for _ in 0..4 {
+    for round in 0..MAX_TRIALS {
         if tried.iter().any(|t| t.value == v) {
             break;
         }
         tried.push(trial(input, p, enc, v, q, scale_to, spans, dir)?);
+        progress((round + 1) as f64 / MAX_TRIALS as f64);
         let pass = tried.iter().filter(|t| t.score >= target).max_by_key(|t| t.value);
         let fail = tried.iter().filter(|t| t.score < target).min_by_key(|t| t.value);
         v = match (pass, fail) {
@@ -658,6 +669,9 @@ fn search(input: &Path, p: &Probe, enc: &'static str, q: Quality, target: f64, s
     let i = tried.iter().position(|t| t.value == best).unwrap_or(0);
     Ok(tried.swap_remove(i))
 }
+
+/// Settings tried per encoder: about one per second of waiting on a fast PC.
+const MAX_TRIALS: usize = 3;
 
 /// encoder-choice.json: which encoder won the last measurement, per codec and size.
 fn choice_path() -> Option<PathBuf> {
@@ -720,29 +734,30 @@ fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>
     let key = format!("{}-{size_key}-{:?}", codec.key(), q).to_lowercase();
 
     let chosen = match hardware {
-        Some(hw) if hw != first && is_software(first) => {
-            match remembered(&key) {
-                Some((enc, uses)) if uses < RECHECK_AFTER && list.iter().any(|e| *e == enc) => {
-                    let enc = list.iter().copied().find(|e| *e == enc).unwrap_or(first);
-                    remember(&key, enc, uses + 1);
-                    search(input, p, enc, q, target, scale_to, &spans, &tmp.0)?
-                }
-                _ => {
-                    let sw = search(input, p, first, q, target, scale_to, &spans, &tmp.0)?;
-                    progress(0.5);
-                    let hwt = search(input, p, hw, q, target, scale_to, &spans, &tmp.0)?;
-                    let use_hw = prefer_hardware(&sw, &hwt, duration, sampled, q);
-                    log::info!(
-                        "video encoder choice: {first} {} bytes in {:.1}s vs {hw} {} bytes in {:.1}s -> {}",
-                        sw.bytes, sw.secs, hwt.bytes, hwt.secs, if use_hw { hw } else { first }
-                    );
-                    let (enc, t) = if use_hw { (hw, hwt) } else { (first, sw) };
-                    remember(&key, enc, 1);
-                    t
-                }
+        // "Balanced" and "Smaller": the graphics card, which is many times faster;
+        // its setting is still chosen by how the result looks.
+        Some(hw) if q != Quality::Best => search(input, p, hw, q, target, scale_to, &spans, &tmp.0, progress)?,
+        // "Best": software and card are both measured (now and then) and the better one kept.
+        Some(hw) if hw != first && is_software(first) => match remembered(&key) {
+            Some((enc, uses)) if uses < RECHECK_AFTER && list.iter().any(|e| *e == enc) => {
+                let enc = list.iter().copied().find(|e| *e == enc).unwrap_or(first);
+                remember(&key, enc, uses + 1);
+                search(input, p, enc, q, target, scale_to, &spans, &tmp.0, progress)?
             }
-        }
-        _ => search(input, p, first, q, target, scale_to, &spans, &tmp.0)?,
+            _ => {
+                let sw = search(input, p, first, q, target, scale_to, &spans, &tmp.0, &mut |f| progress(f * 0.5))?;
+                let hwt = search(input, p, hw, q, target, scale_to, &spans, &tmp.0, &mut |f| progress(0.5 + f * 0.5))?;
+                let use_hw = prefer_hardware(&sw, &hwt, duration, sampled, q);
+                log::info!(
+                    "video encoder choice: {first} {} bytes in {:.1}s vs {hw} {} bytes in {:.1}s -> {}",
+                    sw.bytes, sw.secs, hwt.bytes, hwt.secs, if use_hw { hw } else { first }
+                );
+                let (enc, t) = if use_hw { (hw, hwt) } else { (first, sw) };
+                remember(&key, enc, 1);
+                t
+            }
+        },
+        _ => search(input, p, first, q, target, scale_to, &spans, &tmp.0, progress)?,
     };
     progress(1.0);
     // How big the result will be next to the source, from the samples.

@@ -90,6 +90,8 @@ unsafe fn file_view_root(pt: POINT) -> Option<HWND> {
         "CabinetWClass" | "ExploreWClass" => under_class == "DirectUIHWND" && parent_class == "SHELLDLL_DefView",
         // Desktop icons.
         "Progman" | "WorkerW" => under_class == "SysListView32",
+        // Open and Save dialogs host the same file view.
+        "#32770" => under_class == "DirectUIHWND" && parent_class == "SHELLDLL_DefView",
         _ => false,
     };
     is_item_view.then_some(root)

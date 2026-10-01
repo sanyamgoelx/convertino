@@ -5,7 +5,9 @@
 //! tabs, the entry whose browser window is the active tab) → its shell view
 //! → `IFolderView2::GetSelection` → file-system paths.
 
+use super::dialog;
 use super::Selection;
+use std::path::PathBuf;
 use ::windows::core::{w, Interface, PCWSTR, PWSTR};
 use ::windows::Win32::Foundation::HWND;
 use ::windows::Win32::Foundation::POINT;
@@ -14,8 +16,14 @@ use ::windows::Win32::System::Com::{
     CLSCTX_ALL, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED,
 };
 use ::windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationSelectionItemPattern, UIA_ListItemControlTypeId,
-    UIA_SelectionItemPatternId,
+    CUIAutomation, IUIAutomation, IUIAutomationSelectionItemPattern, IUIAutomationSelectionPattern,
+    TreeScope_Descendants, UIA_ControlTypePropertyId, UIA_ListControlTypeId, UIA_ListItemControlTypeId,
+    UIA_SelectionItemPatternId, UIA_SelectionPatternId,
+};
+use ::windows::Win32::Foundation::{LPARAM, WPARAM};
+use ::windows::Win32::UI::Shell::{
+    FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music, FOLDERID_Pictures,
+    FOLDERID_Profile, FOLDERID_Videos, IShellItem, SHGetKnownFolderItem, KF_FLAG_DEFAULT, SIGDN_NORMALDISPLAY,
 };
 use ::windows::Win32::System::Variant::{VARIANT, VT_I4};
 use ::windows::Win32::UI::Shell::{
@@ -23,7 +31,8 @@ use ::windows::Win32::UI::Shell::{
     SID_STopLevelBrowser, SIGDN_FILESYSPATH, SWC_DESKTOP, SWFO_NEEDDISPATCH,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowExW, GetClassNameW, GetForegroundWindow,
+    EnumChildWindows, FindWindowExW, GetClassNameW, GetDlgItem, GetForegroundWindow, GetParent,
+    SendMessageTimeoutW, SMTO_ABORTIFHUNG, WM_GETTEXT,
 };
 
 type Res<T> = Result<T, String>;
@@ -67,6 +76,7 @@ pub fn selection_for(root: Option<isize>) -> Res<Selection> {
         match class.as_str() {
             "CabinetWClass" | "ExploreWClass" => explorer_selection(&shell_windows, fg),
             "Progman" | "WorkerW" => desktop_selection(&shell_windows),
+            "#32770" => dialog_selection(fg),
             other => {
                 log::info!("hotkey pressed in a window of class {other}");
                 Err("Select files in File Explorer or on the desktop first, then press the shortcut.".into())
@@ -118,6 +128,7 @@ unsafe fn explorer_selection(shell_windows: &IShellWindows, fg: HWND) -> Res<Sel
         return Ok(Selection {
             source: "File Explorer".into(),
             paths: selected_paths(&browser)?,
+        ..Default::default()
         });
     }
     Err("Couldn't find the active Explorer tab".into())
@@ -137,6 +148,7 @@ unsafe fn desktop_selection(shell_windows: &IShellWindows) -> Res<Selection> {
     Ok(Selection {
         source: "Desktop".into(),
         paths: selected_paths(&browser)?,
+        ..Default::default()
     })
 }
 
@@ -167,6 +179,143 @@ unsafe fn selected_paths(browser: &IShellBrowser) -> Res<Vec<String>> {
         return Err("These items aren't ordinary files (inside a ZIP, the Recycle Bin or a phone, say). Copy or extract them to a folder first.".into());
     }
     Ok(paths)
+}
+
+// ---------------------------------------------------------------------------
+// Open and Save dialogs (another app's window: read from the outside).
+
+/// Every child window, at any depth.
+unsafe fn descendants(parent: HWND) -> Vec<HWND> {
+    unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> ::windows::core::BOOL {
+        let v = &mut *(lparam.0 as *mut Vec<HWND>);
+        v.push(hwnd);
+        true.into()
+    }
+    let mut v: Vec<HWND> = Vec::new();
+    let _ = EnumChildWindows(Some(parent), Some(collect), LPARAM(&mut v as *mut _ as isize));
+    v
+}
+
+/// A control's text, also in another app (WM_GETTEXT is passed across processes).
+unsafe fn text_of(hwnd: HWND) -> String {
+    let mut buf = vec![0u16; 2048];
+    let mut copied: usize = 0;
+    let r = SendMessageTimeoutW(
+        hwnd,
+        WM_GETTEXT,
+        WPARAM(buf.len()),
+        LPARAM(buf.as_mut_ptr() as isize),
+        SMTO_ABORTIFHUNG,
+        500,
+        Some(&mut copied),
+    );
+    if r.0 == 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buf[..copied.min(buf.len())])
+}
+
+/// The folder the dialog shows, from its address bar.
+unsafe fn dialog_folder(all: &[HWND]) -> Option<PathBuf> {
+    let bar = all.iter().copied().find(|h| {
+        class_name(*h) == "ToolbarWindow32" && GetParent(*h).map(|p| class_name(p) == "Breadcrumb Parent").unwrap_or(false)
+    })?;
+    let shown = dialog::parse_address(&text_of(bar));
+    let p = PathBuf::from(&shown);
+    if p.is_absolute() && p.is_dir() {
+        return Some(p);
+    }
+    // Known folders show their name ("Downloads", "Desktop"), in the user's language.
+    for id in [&FOLDERID_Desktop, &FOLDERID_Documents, &FOLDERID_Downloads, &FOLDERID_Pictures, &FOLDERID_Music, &FOLDERID_Videos, &FOLDERID_Profile] {
+        let Ok(item) = SHGetKnownFolderItem::<IShellItem>(id, KF_FLAG_DEFAULT, None) else { continue };
+        let Ok(name) = item.GetDisplayName(SIGDN_NORMALDISPLAY) else { continue };
+        if pwstr_to_string(name).eq_ignore_ascii_case(&shown) {
+            if let Ok(path) = item.GetDisplayName(SIGDN_FILESYSPATH) {
+                return Some(PathBuf::from(pwstr_to_string(path)));
+            }
+        }
+    }
+    log::info!("file dialog: couldn't turn the address {shown:?} into a folder");
+    None
+}
+
+/// Names of the items selected in the dialog's file list (UI Automation).
+fn dialog_selected_names(view: isize) -> Vec<String> {
+    std::thread::spawn(move || unsafe {
+        let _com = ComGuard(CoInitializeEx(None, COINIT_MULTITHREADED).is_ok());
+        let Ok(uia) = CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) else { return Vec::new() };
+        let Ok(root) = uia.ElementFromHandle(HWND(view as *mut core::ffi::c_void)) else { return Vec::new() };
+        let Ok(cond) = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &variant_i4(UIA_ListControlTypeId.0)) else {
+            return Vec::new();
+        };
+        let Ok(list) = root.FindFirst(TreeScope_Descendants, &cond) else { return Vec::new() };
+        let Ok(pattern) = list.GetCurrentPatternAs::<IUIAutomationSelectionPattern>(UIA_SelectionPatternId) else {
+            return Vec::new();
+        };
+        let Ok(selected) = pattern.GetCurrentSelection() else { return Vec::new() };
+        let n = selected.Length().unwrap_or(0);
+        (0..n)
+            .filter_map(|i| selected.GetElement(i).ok())
+            .filter_map(|e| e.CurrentName().ok().map(|b| b.to_string()))
+            .filter(|s| !s.is_empty())
+            .collect()
+    })
+    .join()
+    .unwrap_or_default()
+}
+
+/// The "File name" box and the "Save as type" list (standard control ids).
+unsafe fn dialog_name_and_type(dlg: HWND) -> (String, String) {
+    let name = GetDlgItem(Some(dlg), 0x47C)
+        .ok()
+        .and_then(|combo| descendants(combo).into_iter().find(|h| class_name(*h) == "Edit"))
+        .or_else(|| GetDlgItem(Some(dlg), 0x480).ok())
+        .map(|h| text_of(h))
+        .unwrap_or_default();
+    let kind = GetDlgItem(Some(dlg), 0x470).ok().map(|h| text_of(h)).unwrap_or_default();
+    (name, kind)
+}
+
+/// An Open or Save dialog: the files selected in its list, else the names in
+/// "File name". In a Save dialog whose file doesn't exist yet, the conversion
+/// waits for it (`pending_dialog`).
+unsafe fn dialog_selection(dlg: HWND) -> Res<Selection> {
+    let all = descendants(dlg);
+    let Some(view) = all.iter().copied().find(|h| class_name(*h) == "SHELLDLL_DefView") else {
+        return Err("Select files in File Explorer, on the desktop or in an Open or Save window, then press the shortcut.".into());
+    };
+    let folder = dialog_folder(&all).ok_or("Convertino can't tell which folder this window shows. Open a normal folder (not This PC or a library) and try again.")?;
+    let selected = dialog_selected_names(view.0 as isize);
+    let paths = dialog::resolve(&folder, &selected);
+    if !paths.is_empty() {
+        return Ok(Selection { source: "File dialog".into(), paths: strings(paths), ..Default::default() });
+    }
+    let (typed, kind) = dialog_name_and_type(dlg);
+    let names = dialog::parse_names(&typed);
+    let paths = dialog::resolve(&folder, &names);
+    if !paths.is_empty() {
+        return Ok(Selection { source: "File dialog".into(), paths: strings(paths), ..Default::default() });
+    }
+    if let [one] = names.as_slice() {
+        if let Some(target) = dialog::save_target(&folder, one, &kind) {
+            log::info!("file dialog: {} doesn't exist yet; converting it once it's saved", target.display());
+            return Ok(Selection {
+                source: "Save dialog".into(),
+                paths: strings(vec![target]),
+                pending_dialog: Some(dlg.0 as isize),
+            });
+        }
+    }
+    Err("Select a file in this window, or type a file name, then press the shortcut.".into())
+}
+
+fn strings(paths: Vec<PathBuf>) -> Vec<String> {
+    paths.into_iter().map(|p| p.to_string_lossy().into_owned()).collect()
+}
+
+/// Whether the window still exists (a Save dialog closes once the file is saved).
+pub fn window_open(hwnd: isize) -> bool {
+    unsafe { ::windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(HWND(hwnd as *mut core::ffi::c_void))).as_bool() }
 }
 
 unsafe fn pwstr_to_string(p: PWSTR) -> String {
