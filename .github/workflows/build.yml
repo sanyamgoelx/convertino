@@ -57,7 +57,7 @@ jobs:
       - name: Check the bundled converters (Mac)
         if: runner.os == 'macOS'
         run: |
-          T=src-tauri/mac-tools
+          T="$PWD/src-tauri/mac-tools"
           ls "$T/imagemagick/modules/coders" 2>/dev/null | head -5 || echo "no coder modules"
           export MAGICK_HOME="$T/imagemagick" MAGICK_CONFIGURE_PATH="$T/imagemagick/etc" \
                  MAGICK_CODER_MODULE_PATH="$T/imagemagick/modules/coders" MAGICK_CODER_FILTER_PATH="$T/imagemagick/modules/filters" \
@@ -66,8 +66,7 @@ jobs:
           "$T/imagemagick/magick" /tmp/g.png -quality 80 /tmp/g.jpg && "$T/imagemagick/magick" /tmp/g.png /tmp/g.webp && "$T/imagemagick/magick" /tmp/g.png /tmp/g.avif && echo "magick jpg/webp/avif OK"
           "$T/imagemagick/magick" /tmp/g.png /tmp/g.pdf && echo "magick pdf OK"
           "$T/poppler/bin/pdftoppm" -png -r 72 /tmp/g.pdf /tmp/page && ls /tmp/page* && echo "pdftoppm OK"
-          GS_LIB="$(ls -d $T/ghostscript/share/ghostscript/*/Resource/Init | head -1):$(ls -d $T/ghostscript/share/ghostscript/*/lib | head -1)" \
-            "$T/ghostscript/bin/gs" -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=/tmp/g2.pdf /tmp/g.pdf && echo "gs OK"
+          "$T/ghostscript/bin/gs" -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=/tmp/g2.pdf /tmp/g.pdf && echo "gs OK"
 
       - name: Build app and installers (Windows)
         if: runner.os == 'Windows'

@@ -205,9 +205,11 @@ fn bundled_env(path: &Path) -> Vec<(&'static str, PathBuf)> {
             // share/ghostscript/<version>/{Resource/Init,lib,Resource/Font} and share/ghostscript/fonts
             let share = pack.join("share/ghostscript");
             let mut dirs = Vec::new();
-            if let Ok(rd) = std::fs::read_dir(&share) {
-                for e in rd.flatten() {
-                    let v = e.path();
+            // share/ghostscript/<version>/… or, in newer builds, share/ghostscript/… directly.
+            let candidates = std::iter::once(share.clone())
+                .chain(std::fs::read_dir(&share).into_iter().flatten().flatten().map(|e| e.path()));
+            {
+                for v in candidates {
                     if v.join("Resource/Init").is_dir() {
                         dirs.push(v.join("Resource/Init"));
                         dirs.push(v.join("lib"));

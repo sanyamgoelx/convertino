@@ -72,6 +72,9 @@ if [ -n "$MODDIR" ]; then
       cp "$MODDIR/$kind"/*.la "$IM/modules/$kind/" 2>/dev/null || true
       chmod u+w "$IM/modules/$kind"/* || true
       for m in "$IM/modules/$kind"/*.so; do [ -e "$m" ] && mods+=("$m"); done
+      # libltdl loads a module from the .la's libdir first (Homebrew's folder, where a
+      # second copy of ImageMagick may live); with no libdir it uses the .la's own folder.
+      for la in "$IM/modules/$kind"/*.la; do [ -e "$la" ] && sed -i '' "s|^libdir=.*|libdir=''|" "$la"; done
     fi
   done
 fi
@@ -101,6 +104,7 @@ relocate "$GS/lib" @executable_path/../lib "$GS/bin/gs"
 mkdir -p "$GS/share"
 mkdir -p "$GS/share/ghostscript"
 cp -RL "$GSP/share/ghostscript/." "$GS/share/ghostscript/"
+ls "$GS/share/ghostscript"
 fonts_conf "$GS"
 touch "$GS/.bundled"
 
