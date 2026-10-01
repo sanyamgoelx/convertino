@@ -612,6 +612,37 @@ fn open_in_file_manager(dir: &std::path::Path) -> Result<(), String> {
     std::process::Command::new(program).arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Links Settings may open in the browser (nothing else, whatever a page asks).
+const LINKS: &[&str] = &[
+    "https://github.com/sponsors/sanyamgoelx",
+    "https://github.com/sanyamgoelx/convertino",
+    "https://github.com/sanyamgoelx/convertino/releases",
+];
+
+/// Opens one of `LINKS` in the default browser.
+#[tauri::command]
+fn open_link(url: String) -> Result<(), String> {
+    if !LINKS.contains(&url.as_str()) {
+        return Err("That link isn't one Convertino opens.".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // rundll32's URL handler opens the default browser without a console window.
+        std::process::Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        std::process::Command::new(program).arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 fn show_activity(app: AppHandle) {
     show_main(&app);
@@ -1122,6 +1153,7 @@ pub fn run() {
         .manage(update::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             hotkey_status,
+            open_link,
             update::update_check,
             update::update_status,
             update::update_install,

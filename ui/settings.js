@@ -591,6 +591,9 @@ $("show-licences").addEventListener("click", () => $("licences").showModal());
 $("licences-close").addEventListener("click", () => $("licences").close());
 $("open-logs").addEventListener("click", () => invoke("open_logs").catch((e) => toast(String(e))));
 $("show-activity").addEventListener("click", () => invoke("show_activity").catch(() => {}));
+const openLink = (url) => invoke("open_link", { url }).catch((e) => toast(String(e)));
+$("sponsor").addEventListener("click", () => openLink("https://github.com/sponsors/sanyamgoelx"));
+$("open-repo").addEventListener("click", () => openLink("https://github.com/sanyamgoelx/convertino"));
 
 // Updates (Settings > About).
 let update = null;

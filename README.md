@@ -16,6 +16,11 @@ two permissions macOS needs. Open/Save dialogs come next.
 - [Build plan](docs/BUILD-PLAN.md)
 - [Interactive wheel mockup](docs/wheel-mockup.html) (download and open in a browser)
 
+## Support
+
+Convertino is free. If it saves you time, you can support its development through
+**[GitHub Sponsors](https://github.com/sponsors/sanyamgoelx)** (also in Settings › About).
+
 ## Download
 
 Get the latest version from **[Releases](https://github.com/sanyamgoelx/convertino/releases/latest)**:
