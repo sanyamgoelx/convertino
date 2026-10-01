@@ -1,3 +1,5 @@
+<img src="assets/app-icon.png" width="96" height="96" alt="Convertino icon">
+
 # Convertino
 
 Convert any file without leaving Explorer or Finder. Select files, press a hotkey

@@ -211,8 +211,6 @@ select:disabled { opacity: 0.5; }
 
 /* About */
 .about { padding: 18px; }
-.logo-line { fill: none; stroke: var(--ink-3); stroke-width: 2; }
-.logo-accent { fill: var(--accent); }
 .item { display: flex; align-items: center; gap: 16px; min-height: 54px; padding: 8px 18px; border-top: 1px solid var(--card-line); }
 .item:first-child { border-top: 0; }
 

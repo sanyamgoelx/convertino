@@ -6,9 +6,7 @@ const stack = document.getElementById("stack");
 const isMac = /Mac/.test(navigator.platform || navigator.userAgent);
 if (isMac) document.documentElement.dataset.os = "mac";
 
-const LOGO =
-  '<svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" stroke-opacity=".5"/>' +
-  '<path d="M20 2A18 18 0 0 1 32.7 7.3L25.6 14.4A8 8 0 0 0 20 12Z" fill="var(--accent)"/><circle cx="20" cy="20" r="6" fill="none" stroke="currentColor" stroke-opacity=".5"/></svg>';
+const LOGO = '<img class="logo" src="logo.svg" alt="" aria-hidden="true">';
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const cards = new Map(); // job id -> { el, timer }
 
