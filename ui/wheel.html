@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Convertino wheel</title>
+<link rel="stylesheet" href="wheel.css">
+</head>
+<body>
+  <div class="wheel" id="wheel" role="menu" aria-label="Convert to"></div>
+  <div class="hint" id="hint" aria-live="polite"></div>
+  <form class="opts" id="opts" role="dialog" aria-labelledby="opts-title" hidden>
+    <div class="opts-head"><span class="opts-title" id="opts-title"></span><span class="opts-sub">for this conversion</span></div>
+    <div class="opts-fields" id="opts-fields"></div>
+    <label class="opts-keep"><input type="checkbox" id="opts-keep"><span>Use these every time</span></label>
+    <div class="opts-buttons"><button type="button" id="opts-cancel">Cancel</button><button type="submit" class="primary">Convert</button></div>
+  </form>
+  <div class="ring" id="ring">
+    <div class="ring-disc"></div>
+    <svg class="ring-svg" viewBox="0 0 72 72" aria-hidden="true"><circle class="track" cx="36" cy="36" r="32"/><circle class="prog" id="ring-prog" cx="36" cy="36" r="32"/></svg>
+    <div class="ring-in" id="ring-in" role="status" aria-live="polite"></div>
+    <div class="ring-pill"><span class="ring-text" id="ring-text"></span><button type="button" id="ring-undo">Undo</button></div>
+  </div>
+  <script src="wheel.js"></script>
+</body>
+</html>

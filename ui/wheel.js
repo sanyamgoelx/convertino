@@ -1,0 +1,514 @@
+// Convertino wheel. Rust sends a model ("wheel-open") with the slots to show;
+// this file draws the ring, handles mouse and keyboard, and reports the pick.
+
+const CX = 210, CY = 190;          // wheel centre inside the window (see wheel.css)
+const D = 340, R = D / 2;
+const RI = R * 0.38;               // inner radius of the ring (hub edge)
+const RO = R - 7;                  // outer radius of the ring
+const FAR = R + 44;                // pointing further than this cancels the highlight
+
+const ICONS = {
+  image: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="9" r="1.4"/>',
+  audio: '<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+  video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>',
+  doc: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 11h6M9 14h6M9 17h4"/>',
+  table: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16M4 14.5h16M10 5v14"/>',
+  code: '<path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/>',
+  archive: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v2M12 8v2M12 12v2"/><rect x="10.5" y="15" width="3" height="3" rx=".5"/>',
+  compress: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
+  split: '<circle cx="6" cy="7" r="2.5"/><circle cx="6" cy="17" r="2.5"/><path d="M8 8.5L20 17M8 15.5L20 7"/>',
+  merge: '<path d="M6 4v5c0 3 6 3 6 6v5M18 4v5c0 3-6 3-6 6"/>',
+  resize: '<path d="M4 14v6h6M20 10V4h-6M4 20l6-6M20 4l-6 6"/>',
+  trim: '<path d="M4 12h1M7 9v6M10 5v14M13 8v8M16 10v4M19 12h1"/>',
+  extract: '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M12 10v6M9 13l3 3 3-3"/>',
+  frames: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4"/>',
+  gif: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 10.5a2 2 0 100 3h1v-1.5M12 10v4M15 14v-4h2.5M15 12h2"/>',
+  level: '<path d="M4 12h2M8 8v8M12 4v16M16 8v8"/><path d="M3 20h18"/>',
+  more: '<circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/>',
+  back: '<path d="M10 6l-6 6 6 6M4 12h16"/>',
+  pdf: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M8.5 16.5c2-1 4.5-5.5 3.5-6.5s-1 3 3.5 5"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+};
+const icon = (name, size = 20) =>
+  `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.doc}</svg>`;
+const fileTile = (color, size = 28) =>
+  `<svg width="${size}" height="${size * 1.2}" viewBox="0 0 20 24" aria-hidden="true"><path d="M3.5 1h9L17 5.5v17H3.5z" fill="var(--hub-bg)" stroke="var(--ink-3)"/><path d="M12.5 1v4.5H17" fill="none" stroke="var(--ink-3)"/><rect x="3.5" y="15" width="13.5" height="7.5" fill="${color}"/></svg>`;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+const wheelEl = document.getElementById("wheel");
+const hintEl = document.getElementById("hint");
+const ringEl = document.getElementById("ring");
+const ringProg = document.getElementById("ring-prog");
+const ringIn = document.getElementById("ring-in");
+const ringText = document.getElementById("ring-text");
+const ringUndo = document.getElementById("ring-undo");
+const RING_C = 2 * Math.PI * 32;     // circumference of the ring's arc
+const HANDOFF_MS = 2000;             // default; Settings can change it (model.handoffMs)
+const tauri = window.__TAURI__;
+
+let model = null;
+let slots = [];
+let page = "main";
+let active = -1;
+let busy = false; // true while closing, so a double click can't pick twice
+
+// ---------- drawing ----------
+
+function point(r, deg) {
+  const a = (deg * Math.PI) / 180;
+  return `${(R + r * Math.cos(a)).toFixed(2)} ${(R + r * Math.sin(a)).toFixed(2)}`;
+}
+function sector(a0, a1) {
+  const large = a1 - a0 > 180 ? 1 : 0;
+  return `M${point(RO, a0)} A${RO} ${RO} 0 ${large} 1 ${point(RO, a1)} L${point(RI, a1)} A${RI} ${RI} 0 ${large} 0 ${point(RI, a0)} Z`;
+}
+function arc(r, a0, a1) {
+  return `M${point(r, a0)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${point(r, a1)}`;
+}
+
+function draw() {
+  const n = slots.length;
+  const step = 360 / n;
+  const gap = n > 1 ? 1.1 : 0;
+  const segs = slots
+    .map((s, i) => {
+      const c = -90 + i * step;
+      return `<path class="seg" data-i="${i}" d="${sector(c - step / 2 + gap, c + step / 2 - gap)}"/>` +
+        `<path class="arc" data-i="${i}" d="${arc(R - 2.5, c - step / 2 + 3, c + step / 2 - 3)}"/>`;
+    })
+    .join("");
+  const rm = (RI + RO) / 2 + 2;
+  const labels = slots
+    .map((s, i) => {
+      const a = ((-90 + i * step) * Math.PI) / 180;
+      const x = (R + rm * Math.cos(a)).toFixed(1), y = (R + rm * Math.sin(a)).toFixed(1);
+      return `<div class="slot" role="menuitem" data-i="${i}" style="left:${x}px;top:${y}px;transition-delay:${i * 14}ms">` +
+        (s.tag ? `<span class="tag">${esc(s.tag)}</span>` : "") +
+        icon(s.icon) + `<span class="lbl">${esc(s.label)}</span>` +
+        (i < 9 && !s.tag ? `<span class="key">${i + 1}</span>` : "") + `</div>`;
+    })
+    .join("");
+  const hub = `<div class="hub">${fileTile(model.hubColor)}<div class="hn" title="${esc(model.hubTitle)}">${esc(model.hubTitle)}</div><div class="hm">${esc(model.hubSubtitle)}</div></div>`;
+  wheelEl.innerHTML = `<svg viewBox="0 0 ${D} ${D}" aria-hidden="true">${segs}</svg>${labels}${hub}`;
+  setActive(-1);
+}
+
+function setActive(i) {
+  active = i;
+  wheelEl.querySelectorAll("[data-i]").forEach((el) => el.classList.toggle("on", Number(el.dataset.i) === i));
+  const s = slots[i];
+  if (!s) {
+    const skipped = model && model.skipped.length ? ` · ${model.skipped.length} item${model.skipped.length > 1 ? "s" : ""} skipped` : "";
+    hintEl.innerHTML = `<span class="hs">Point at a format${skipped}</span><span class="hk">1–${Math.min(9, slots.length)} to pick · arrows to move · Esc to cancel</span>`;
+    return;
+  }
+  const files = s.kind === "target" && s.count > 1 ? ` · ${s.count} files` : "";
+  const how = s.kind !== "target" ? "Click to open" : OPTIONS[s.id] ? "Click to convert · Shift+click for options" : "Click to convert";
+  hintEl.innerHTML =
+    `<span class="ht">${s.tag ? esc(s.tag) + " → " : ""}${esc(s.label)}</span>` +
+    `<span class="hs">${esc(s.hint)}${files}</span>` +
+    `<span class="hk">${how}</span>`;
+}
+
+// ---------- open / close / pick ----------
+
+let openCount = 0;          // bumps on every open, so a stale pick can tell
+
+function open(m) {
+  openCount++;
+  hideOptions();
+  resetRing();
+  early.clear();
+  model = m;
+  busy = false;
+  document.documentElement.dataset.os = m.os;
+  if (m.accent) document.documentElement.style.setProperty("--accent", m.accent);
+  page = "main";
+  slots = m.main;
+  wheelEl.classList.remove("open", "closing");
+  hintEl.classList.remove("show");
+  draw();
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    wheelEl.classList.add("open");
+    hintEl.classList.add("show");
+  }));
+  window.focus();
+}
+
+function animateOut(then) {
+  busy = true;
+  wheelEl.classList.remove("open");
+  wheelEl.classList.add("closing");
+  hintEl.classList.remove("show");
+  setTimeout(then, 110);
+}
+
+function close() {
+  if (busy) return;
+  animateOut(() => tauri && tauri.core.invoke("wheel_close"));
+}
+
+function showPage(p) {
+  page = p;
+  slots = p === "more" ? model.more : model.main;
+  draw();
+}
+
+/// `withOptions`: Shift held, so first ask for this conversion's options.
+function choose(i, withOptions = false) {
+  if (busy) return;
+  const s = slots[i];
+  if (!s) return;
+  if (s.kind === "more") return showPage("more");
+  if (s.kind === "back") return showPage("main");
+  if (withOptions && OPTIONS[s.id]) return showOptions(s);
+  start(s, null, false);
+}
+
+function start(s, quality, remember) {
+  const args = { targetId: s.id, label: s.label, family: s.family, quality, remember };
+  // Edit opens the PDF editor window instead of converting; with the ring
+  // turned off in Settings, progress goes straight to the corner card.
+  if (s.id === "pdf.edit" || (model && model.ring === false)) {
+    return animateOut(() => tauri && tauri.core.invoke("wheel_pick", args));
+  }
+  pick(s, args);
+}
+
+// ---------- Shift+click options ----------
+// The values start from Settings (model.quality); "Use these every time" saves them there.
+
+const SIZES = [[0, "Keep the size"], [3840, "Longest side 3840 px"], [2560, "Longest side 2560 px"], [1920, "Longest side 1920 px"], [1280, "Longest side 1280 px"]];
+const FIELDS = {
+  image: { label: "File size", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"], ["fixed", "Fixed quality"]] },
+  jpg: { label: "Quality (Fixed)", min: 50, max: 100 },
+  webp: { label: "Quality (Fixed)", min: 50, max: 100 },
+  convertMax: { label: "Size", options: SIZES },
+  resize: { label: "Longest side", options: [[1280, "1280 px"], [1920, "1920 px"], [2560, "2560 px"], [3840, "3840 px (4K)"]] },
+  dpi: { label: "Page resolution", options: [[72, "Screen (72 DPI)"], [150, "Standard (150 DPI)"], [300, "Print (300 DPI)"]] },
+  pdfCompress: { label: "Compress", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["high", "Best quality"]] },
+  mp3: { label: "Quality", options: [[128, "About 130 kbps"], [160, "About 165 kbps"], [192, "About 190 kbps"], [320, "Highest (about 245 kbps)"]] },
+  video: { label: "Quality", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"]] },
+  gifWidth: { label: "Width", options: [[320, "320 px"], [480, "480 px"], [640, "640 px"]] },
+  gifSeconds: { label: "Length", options: [[10, "First 10 s"], [30, "First 30 s"], [60, "First 60 s"]] },
+};
+const OPTIONS = {
+  "image.jpg": ["image", "jpg", "convertMax"], "image.webp": ["image", "webp", "convertMax"],
+  "image.png": ["convertMax"], "image.avif": ["image", "convertMax"], "image.tiff": ["convertMax"],
+  "image.bmp": ["convertMax"], "image.gif": ["convertMax"], "image.pdf": ["convertMax"],
+  "image.resize": ["resize"],
+  "pdf.jpg": ["dpi", "image", "jpg"], "pdf.png": ["dpi"], "pdf.webp": ["dpi", "image", "webp"], "pdf.compress": ["pdfCompress"],
+  "audio.mp3": ["mp3"], "video.mp3": ["mp3"],
+  "video.mp4": ["video"], "video.mov": ["video"], "video.720p": ["video"], "video.webm": ["video"], "video.compress": ["video"],
+  "video.gif": ["gifWidth", "gifSeconds"],
+};
+const DEFAULT_Q = { jpg: 90, webp: 85, resize: 1920, convertMax: 0, dpi: 150, pdfCompress: "balanced", mp3: 320, video: "balanced", gifWidth: 480, gifSeconds: 30, image: "balanced" };
+
+const optsEl = document.getElementById("opts");
+const optsFields = document.getElementById("opts-fields");
+const optsKeep = document.getElementById("opts-keep");
+let optsFor = null;   // { slot, q }
+
+function showOptions(s) {
+  const q = Object.assign({}, DEFAULT_Q, (model && model.quality) || {});
+  optsFor = { slot: s, q };
+  document.getElementById("opts-title").textContent = s.label;
+  optsKeep.checked = false;
+  optsFields.innerHTML = OPTIONS[s.id].map((key) => {
+    const f = FIELDS[key];
+    if (f.options) {
+      const opts = f.options.map(([v, label]) => `<option value="${esc(v)}"${String(v) === String(q[key]) ? " selected" : ""}>${esc(label)}</option>`).join("");
+      return `<label class="opts-field"><span>${esc(f.label)}</span><select data-k="${key}">${opts}</select></label>`;
+    }
+    return `<label class="opts-field"><span class="row"><span>${esc(f.label)}</span><span class="val" data-v="${key}">${q[key]}</span></span>` +
+      `<input type="range" data-k="${key}" min="${f.min}" max="${f.max}" step="1" value="${q[key]}"></label>`;
+  }).join("");
+  optsEl.hidden = false;
+  document.body.classList.add("with-opts");
+  hintEl.classList.remove("show");
+  const first = optsFields.querySelector("select, input");
+  if (first) first.focus();
+}
+
+function hideOptions() {
+  optsFor = null;
+  if (optsEl) optsEl.hidden = true;
+  document.body.classList.remove("with-opts");
+}
+
+if (optsEl) {
+  optsFields.addEventListener("input", (e) => {
+    const k = e.target.dataset.k;
+    if (!k || !optsFor) return;
+    const raw = e.target.value;
+    optsFor.q[k] = typeof DEFAULT_Q[k] === "number" ? Number(raw) : raw;
+    const v = optsFields.querySelector(`[data-v="${k}"]`);
+    if (v) v.textContent = raw;
+  });
+  optsEl.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!optsFor) return;
+    const { slot, q } = optsFor;
+    const remember = optsKeep.checked;
+    hideOptions();
+    start(slot, q, remember);
+  });
+  document.getElementById("opts-cancel").addEventListener("click", (e) => {
+    e.stopPropagation();
+    hideOptions();
+    hintEl.classList.add("show");
+  });
+  optsEl.addEventListener("click", (e) => e.stopPropagation());
+  optsEl.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideOptions(); hintEl.classList.add("show"); }
+  });
+}
+
+// ---------- progress ring ----------
+// After a pick the wheel collapses into a ring at the same spot. A job that
+// finishes within HANDOFF_MS ends there (tick, what was saved, Undo); a longer
+// one or a failure moves to the HUD's corner card.
+
+let ring = null;            // { id, flip, done, gone, handoff, fade }
+const early = new Map();    // job events that arrived before the pick returned its id
+
+const TICK = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Done"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const UNDONE = '<svg class="undone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Undone"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-3"/></svg>';
+
+function pick(s, args) {
+  busy = true;
+  const pickedAt = performance.now();
+  hintEl.classList.remove("show");
+  wheelEl.classList.add("collapsing");
+  const collapse = new Promise((r) => setTimeout(r, 180));
+  if (!tauri) return demoRing(s, collapse);
+  const picked = tauri.core.invoke("wheel_pick", args);
+  const openedAs = openCount;
+  Promise.all([picked, collapse]).then(async ([id]) => {
+    // A new wheel opened meanwhile: it has handed this job to the corner card.
+    if (openCount !== openedAs) return;
+    const got = early.get(id) || {};
+    early.delete(id);
+    // Failed straight away (nothing to convert, say): straight to the corner card.
+    if (got.done && !got.done.ok) return tauri.core.invoke("ring_handoff", { id });
+    const layout = await tauri.core.invoke("ring_mode");
+    if (openCount !== openedAs) return;
+    startRing(id, s.label, layout.flip, pickedAt);
+    if (got.progress) ringProgress(got.progress);
+    if (got.done) ringDone(got.done);
+  }).catch((e) => {
+    console.error(e);
+    picked.then((id) => tauri.core.invoke("ring_end", { id })).catch(() => {});
+  });
+}
+
+function startRing(id, label, flip, pickedAt) {
+  ring = { id, flip, done: false, gone: false, handoff: null, fade: null };
+  document.body.classList.add("ringmode");
+  ringEl.className = "ring" + (flip ? " flip" : "");
+  ringProg.style.strokeDashoffset = RING_C;
+  ringIn.innerHTML = `<span class="rl">${esc(label)}</span><span class="rp">0%</span>`;
+  ringText.textContent = "";
+  ringUndo.hidden = false;
+  ringUndo.disabled = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => ringEl.classList.add("show")));
+  const handoffMs = (model && model.handoffMs) || HANDOFF_MS;
+  ring.handoff = setTimeout(handOff, Math.max(0, handoffMs - (performance.now() - pickedAt)));
+}
+
+function ringProgress(p) {
+  if (!ring || ring.done) return;
+  ringProg.style.strokeDashoffset = RING_C * (1 - Math.min(1, Math.max(0, p.fraction)));
+  const rp = ringIn.querySelector(".rp");
+  // "File 2 of 5" is too long for the ring: "2 / 5".
+  // A converter downloading on first use: just its percentage (the corner
+  // card, after the hand-over, says what's downloading).
+  if (rp) rp.textContent = String(p.detail)
+    .replace(/^File (\d+) of (\d+)$/, "$1 / $2")
+    .replace(/^Downloading .* · (\d+%|\d+ MB)$/, "↓ $1")
+    .replace(/^(Setting up|Installing) .*$/, "…");
+}
+
+function ringDone(d) {
+  if (!ring || ring.gone) return;
+  if (!d.ok) return handOff(); // errors need room to read: the corner card
+  clearTimeout(ring.handoff);
+  ring.done = true;
+  ringProg.style.strokeDashoffset = 0;
+  ringIn.innerHTML = TICK;
+  // "holiday-goa.jpg · 2.8 MB" -> "Saved holiday-goa.jpg"
+  ringText.textContent = "Saved " + String(d.body).split(" · ")[0];
+  ringUndo.hidden = !d.canUndo;
+  ringEl.classList.add("done");
+  if (tauri) tauri.core.invoke("ring_interactive", { on: true });
+  scheduleFade(1600);
+}
+
+function scheduleFade(ms) {
+  if (!ring) return;
+  clearTimeout(ring.fade);
+  ring.fade = setTimeout(fadeRing, ms);
+}
+
+function fadeRing() {
+  if (!ring || ring.gone) return;
+  const id = ring.id;
+  ring.gone = true;
+  ringEl.classList.remove("show");
+  ringEl.classList.add("leave");
+  setTimeout(() => {
+    if (ring && ring.id === id) resetRing();
+    if (tauri) tauri.core.invoke("ring_end", { id });
+  }, 200);
+}
+
+function handOff() {
+  if (!ring || ring.gone || ring.done) return;
+  const id = ring.id;
+  ring.gone = true;
+  clearTimeout(ring.handoff);
+  ringEl.classList.remove("show");
+  ringEl.classList.add("fly");
+  setTimeout(() => {
+    if (ring && ring.id === id) resetRing();
+    if (tauri) tauri.core.invoke("ring_handoff", { id });
+  }, 280);
+}
+
+function resetRing() {
+  if (ring) {
+    clearTimeout(ring.handoff);
+    clearTimeout(ring.fade);
+  }
+  ring = null;
+  document.body.classList.remove("ringmode");
+  ringEl.className = "ring";
+  wheelEl.classList.remove("collapsing");
+}
+
+ringEl.addEventListener("mouseenter", () => ring && ring.done && clearTimeout(ring.fade));
+ringEl.addEventListener("mouseleave", () => ring && ring.done && scheduleFade(900));
+ringUndo.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  if (!ring || !ring.done) return;
+  ringUndo.disabled = true;
+  try {
+    if (tauri) await tauri.core.invoke("job_undo", { id: ring.id });
+    ringIn.innerHTML = UNDONE;
+    ringText.textContent = isMacUi() ? "Moved to the Trash" : "Moved to the Recycle Bin";
+    ringUndo.hidden = true;
+  } catch (err) {
+    ringText.textContent = String(err);
+    ringUndo.disabled = false;
+  }
+  scheduleFade(1200);
+});
+
+function isMacUi() { return document.documentElement.dataset.os === "mac"; }
+
+// Opened in a browser: fake a job so the ring can be checked.
+function demoRing(s, collapse) {
+  collapse.then(() => {
+    startRing(1, s.label, false, performance.now());
+    let f = 0;
+    const t = setInterval(() => {
+      f = Math.min(1, f + 0.08);
+      ringProgress({ fraction: f, detail: Math.round(f * 100) + "%" });
+      if (f >= 1) {
+        clearInterval(t);
+        ringDone({ ok: true, body: "Q3-report – pages · 3 images", canUndo: true });
+      }
+    }, 90);
+  });
+}
+
+// ---------- input ----------
+
+function indexAt(x, y) {
+  const dx = x - CX, dy = y - CY, d = Math.hypot(dx, dy);
+  if (d < RI || d > FAR || !slots.length) return -1;
+  const a = ((Math.atan2(dy, dx) * 180) / Math.PI + 90 + 360) % 360;
+  return Math.round(a / (360 / slots.length)) % slots.length;
+}
+
+document.addEventListener("pointermove", (e) => {
+  if (!model || busy || ring || optsFor) return;
+  const i = indexAt(e.clientX, e.clientY);
+  if (i !== active) setActive(i);
+});
+
+document.addEventListener("click", (e) => {
+  if (!model || busy || ring) return;
+  // A click beside the options card closes just the card.
+  if (optsFor) { hideOptions(); hintEl.classList.add("show"); return; }
+  const i = indexAt(e.clientX, e.clientY);
+  if (i >= 0) choose(i, e.shiftKey);
+  else close(); // the hub or empty space
+});
+
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+document.addEventListener("keydown", (e) => {
+  if (!model || busy || ring || optsFor) return;
+  const n = slots.length;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    return page === "more" ? showPage("main") : close();
+  }
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); return setActive((active + 1 + n) % n); }
+  if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); return setActive(active <= 0 ? n - 1 : active - 1); }
+  if (e.key === "Enter" && active >= 0) { e.preventDefault(); return choose(active, e.shiftKey); }
+  if (e.key === "Backspace" && page === "more") { e.preventDefault(); return showPage("main"); }
+  // Shift+1 types "!" on most keyboards: read the key's position instead.
+  const digit = /^Digit([1-9])$/.exec(e.code);
+  const k = digit ? Number(digit[1]) : parseInt(e.key, 10);
+  if (k >= 1 && k <= Math.min(9, n)) { e.preventDefault(); setActive(k - 1); choose(k - 1, e.shiftKey); }
+});
+
+// ---------- wiring ----------
+
+if (tauri) {
+  tauri.event.listen("wheel-open", (ev) => open(ev.payload));
+  const remember = (id, key, value) => early.set(id, Object.assign(early.get(id) || {}, { [key]: value }));
+  tauri.event.listen("job-progress", (ev) => {
+    const p = ev.payload;
+    if (ring && ring.id === p.id) ringProgress(p);
+    else if (!ring) remember(p.id, "progress", p);
+  });
+  tauri.event.listen("job-done", (ev) => {
+    const d = ev.payload;
+    if (ring && ring.id === d.id) ringDone(d);
+    else if (!ring) remember(d.id, "done", d);
+  });
+  // A click somewhere else while the ring shows (Windows).
+  tauri.event.listen("ring-away", () => {
+    if (!ring) return;
+    if (ring.done) fadeRing();
+    else handOff();
+  });
+  tauri.core.invoke("wheel_model").then((m) => { if (m && !model) open(m); }).catch(() => {});
+} else {
+  // Opened in a normal browser: show a sample so the design can be checked.
+  document.documentElement.style.background = "#6b7a8f";
+  const t = (id, label, icon, hint) => ({ id, label, icon, hint, family: "pdf", tag: null, kind: "target", count: 1 });
+  open({
+    os: /Mac/.test(navigator.platform) ? "mac" : "win",
+    accent: null,
+    files: [], skipped: [],
+    hubTitle: "Q3-report.pdf", hubSubtitle: "PDF · 2.5 MB", hubFamily: "pdf", hubColor: "#C4262E",
+    ring: true, handoffMs: 2000, quality: DEFAULT_Q,
+    main: [
+      t("pdf.jpg", "JPG", "image", "One image per page · 150 DPI"),
+      t("pdf.png", "PNG", "image", "Lossless image per page · 150 DPI"),
+      t("pdf.webp", "WEBP", "image", "Smaller images, one per page"),
+      t("pdf.txt", "TXT", "doc", "All text from every page"),
+      t("pdf.split", "Split", "split", "One PDF per page"),
+      t("pdf.compress", "Compress", "compress", "Smaller PDF for email"),
+      { id: "more", label: "More", icon: "more", hint: "More: TIFF, Grayscale", family: "pdf", tag: null, kind: "more", count: 1 },
+    ],
+    more: [
+      t("pdf.tiff", "TIFF", "image", "One multi-page TIFF · 300 DPI"),
+      { id: "back", label: "Back", icon: "back", hint: "Back to the main ring", family: "pdf", tag: null, kind: "back", count: 1 },
+    ],
+  });
+}

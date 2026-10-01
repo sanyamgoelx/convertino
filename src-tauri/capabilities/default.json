@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions for Convertino's windows",
+  "windows": [
+    "main",
+    "wheel",
+    "hud",
+    "editor-*",
+    "settings"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

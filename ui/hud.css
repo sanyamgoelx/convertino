@@ -1,0 +1,86 @@
+/* HUD window: 380 px wide, height follows its cards, transparent. */
+:root {
+  --ink: #1b1b1f;
+  --ink-2: #5e6068;
+  --ink-3: #8a8c94;
+  --line: rgba(0, 0, 0, 0.09);
+  --surface: rgba(249, 249, 249, 0.97);
+  --surface-line: rgba(0, 0, 0, 0.12);
+  --btn: #ffffff;
+  --btn-hover: #f3f3f3;
+  --accent: #005fb8;
+  --bad: #c42b1c;
+  --good: #0f7b0f;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ffffff;
+    --ink-2: #c8c8cf;
+    --ink-3: #8e8e96;
+    --line: rgba(255, 255, 255, 0.08);
+    --surface: rgba(43, 43, 43, 0.97);
+    --surface-line: rgba(255, 255, 255, 0.1);
+    --btn: #373737;
+    --btn-hover: #404040;
+    --accent: #60cdff;
+    --bad: #ff99a4;
+    --good: #6ccb5f;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 1px 4px rgba(0, 0, 0, 0.3);
+    color-scheme: dark;
+  }
+}
+:root[data-os="mac"] { --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; --accent: #007aff; }
+@media (prefers-color-scheme: dark) { :root[data-os="mac"] { --accent: #0a84ff; } }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; overflow: hidden; font: 13px/1.35 var(--font); color: var(--ink); user-select: none; -webkit-user-select: none; }
+
+/* Cards sit at the bottom (Windows) or top (Mac) edge of the window. */
+.stack { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--surface-line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: in 0.26s cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+:root[data-os="mac"] .card { border-radius: 14px; }
+@keyframes in { from { transform: translateX(28px); opacity: 0; } }
+.card.out { opacity: 0; transform: translateX(24px); transition: 0.2s; }
+
+.head { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 11.5px; }
+.head .logo { width: 16px; height: 16px; flex: none; }
+.head .x { margin-left: auto; border: 0; background: none; color: var(--ink-3); font: inherit; font-size: 13px; cursor: pointer; padding: 0 2px; }
+.head .x:hover { color: var(--ink); }
+.title { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.body { color: var(--ink-2); overflow-wrap: anywhere; }
+.card.bad .title { color: var(--bad); }
+
+.bar { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width 0.12s linear; }
+.bar.indeterminate i { width: 30%; animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.detail { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cancel { border: 0; background: none; padding: 2px 4px; margin-right: -4px; font: inherit; font-size: 12px; color: var(--accent); cursor: pointer; border-radius: 4px; }
+.cancel:hover { background: var(--btn-hover); }
+.cancel:disabled { color: var(--ink-3); cursor: default; background: none; }
+
+.buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
+.buttons button {
+  font: inherit; font-size: 12.5px; height: 30px; border-radius: 4px;
+  border: 1px solid var(--line); background: var(--btn); color: var(--ink); cursor: pointer;
+}
+.buttons button:hover { background: var(--btn-hover); }
+.buttons button:disabled { opacity: 0.5; cursor: default; }
+:root[data-os="mac"] .buttons button { border-radius: 7px; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition-duration: 0s !important; } }

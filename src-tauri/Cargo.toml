@@ -1,0 +1,63 @@
+[package]
+name = "convertino"
+version = "0.1.0"
+description = "Convert any file from a radial wheel in Explorer or Finder"
+authors = ["Crofty"]
+license = "GPL-3.0-or-later"
+edition = "2021"
+rust-version = "1.82"
+
+[lib]
+name = "convertino_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-log = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+trash = "5"
+csv = "1"
+serde_norway = "0.9"
+quick-xml = "0.42"
+rust_xlsxwriter = "0.99"
+# How alike two pictures look (pictures and PDF Compress pick the smallest file that still looks the same).
+ssimulacra2 = "0.5"
+# Lossless PNG optimisation.
+oxipng = { version = "10", default-features = false, features = ["parallel"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Ole",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Registry",
+  "Win32_System_Variant",
+  "Win32_UI_Accessibility",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+# The picture comparison is slow unoptimised; tests and dev builds use it too.
+[profile.dev.package.ssimulacra2]
+opt-level = 3
+[profile.dev.package.yuvxyb]
+opt-level = 3
+[profile.dev.package.oxipng]
+opt-level = 3
+[profile.dev.package.libdeflater]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

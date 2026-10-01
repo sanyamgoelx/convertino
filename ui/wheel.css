@@ -1,0 +1,245 @@
+/* Wheel window: 420 × 460 logical px, fully transparent.
+   The wheel (340 px) is centred at (210, 190); keep in sync with lib.rs. */
+:root {
+  --d: 340px;
+  --hub: 124px;
+  --ink: #1b1b1f;
+  --ink-2: #5e6068;
+  --ink-3: #8a8c94;
+  --line: rgba(0, 0, 0, 0.09);
+  --surface: rgba(249, 249, 249, 0.96);
+  --surface-line: rgba(0, 0, 0, 0.12);
+  --hub-bg: #ffffff;
+  --seg: rgba(0, 0, 0, 0.03);
+  --seg-line: rgba(0, 0, 0, 0.06);
+  --accent: #005fb8;
+  --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+  --accent-fg: var(--accent);
+  --on-accent: #ffffff;
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.12);
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ffffff;
+    --ink-2: #c8c8cf;
+    --ink-3: #8e8e96;
+    --line: rgba(255, 255, 255, 0.08);
+    --surface: rgba(40, 40, 40, 0.96);
+    --surface-line: rgba(255, 255, 255, 0.1);
+    --hub-bg: #2c2c2c;
+    --seg: rgba(255, 255, 255, 0.04);
+    --seg-line: rgba(255, 255, 255, 0.06);
+    --accent-soft: color-mix(in srgb, var(--accent) 24%, transparent);
+    --accent-fg: color-mix(in srgb, var(--accent) 55%, white);
+    --shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+  }
+}
+/* macOS: San Francisco, system blue, the hovered slot fills like a Mac menu. */
+:root[data-os="mac"] {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, Menlo, monospace;
+  --accent: #007aff;
+  --surface: rgba(246, 246, 248, 0.96);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-os="mac"] { --accent: #0a84ff; --surface: rgba(36, 36, 38, 0.96); --hub-bg: #1e1e1e; }
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font: 13px/1.3 var(--font);
+  color: var(--ink);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.wheel {
+  position: absolute;
+  left: calc(210px - var(--d) / 2);
+  top: calc(190px - var(--d) / 2);
+  width: var(--d);
+  height: var(--d);
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--surface-line);
+  box-shadow: var(--shadow);
+  transform: scale(0.86);
+  opacity: 0;
+  transition: transform 0.2s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.14s ease-out;
+}
+.wheel.open { transform: scale(1); opacity: 1; }
+.wheel.closing { transform: scale(0.9); opacity: 0; transition-duration: 0.11s; }
+.wheel > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+.seg { fill: var(--seg); stroke: var(--seg-line); stroke-width: 1; transition: fill 0.12s; }
+.seg.on { fill: var(--accent-soft); stroke: var(--accent-fg); stroke-width: 1.5; }
+.arc { fill: none; stroke: var(--accent-fg); stroke-width: 3; stroke-linecap: round; opacity: 0; transition: opacity 0.12s; }
+.arc.on { opacity: 1; }
+:root[data-os="mac"] .seg.on { fill: var(--accent); stroke: none; }
+:root[data-os="mac"] .arc { display: none; }
+
+.slot {
+  position: absolute;
+  width: 80px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease-out, transform 0.18s cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+.wheel.open .slot { opacity: 1; }
+.slot svg { width: 20px; height: 20px; color: var(--ink-2); }
+.slot .lbl { font-size: 12.5px; font-weight: 600; line-height: 1.1; }
+.slot .tag { font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-3); }
+.slot .key { position: absolute; top: -14px; font: 10px var(--mono); color: var(--ink-3); }
+.slot.on { transform: translate(-50%, -50%) scale(1.06); }
+.slot.on svg, .slot.on .lbl { color: var(--accent-fg); }
+:root[data-os="mac"] .slot.on svg,
+:root[data-os="mac"] .slot.on .lbl,
+:root[data-os="mac"] .slot.on .key,
+:root[data-os="mac"] .slot.on .tag { color: var(--on-accent); }
+
+.hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: var(--hub);
+  height: var(--hub);
+  border-radius: 50%;
+  background: var(--hub-bg);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 10px;
+  text-align: center;
+}
+.hub .hn { font-size: 11.5px; font-weight: 600; max-width: calc(var(--hub) - 24px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hub .hm { font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
+
+.hint {
+  position: absolute;
+  left: 50%;
+  top: 374px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--surface-line);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+  padding: 7px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 10px;
+  opacity: 0;
+  transition: opacity 0.16s 0.06s;
+}
+.hint.show { opacity: 1; }
+.hint .ht { font-weight: 600; }
+.hint .hs { color: var(--ink-2); }
+.hint .hk { width: 100%; text-align: center; font-size: 11.5px; color: var(--ink-3); }
+:root[data-os="mac"] .hint { border-radius: 10px; }
+
+/* After a pick the wheel collapses into its centre... */
+.wheel.collapsing { transform: scale(0.22); opacity: 0; transition: transform 0.18s cubic-bezier(0.4, 0, 1, 1), opacity 0.16s ease-in; }
+
+/* ...and the window shrinks to 380 × 120 around the progress ring, centred at
+   (56, 60), or at (324, 60) with its label on the left near the right edge of
+   the screen. Keep in sync with RING_* in lib.rs. */
+body.ringmode .wheel, body.ringmode .hint { display: none; }
+.ring { display: none; position: absolute; left: 20px; top: 24px; width: 72px; height: 72px; }
+body.ringmode .ring { display: block; }
+.ring.flip { left: 288px; }
+.ring { opacity: 0; transform: scale(1.6); transition: transform 0.2s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.16s ease-out; }
+.ring.show { opacity: 1; transform: scale(1); }
+.ring.leave { opacity: 0; transform: scale(0.9); transition-duration: 0.2s; }
+/* Handing over to the corner card: shrink off towards it. */
+.ring.fly { opacity: 0; transform: translate(40px, 24px) scale(0.4); transition: transform 0.28s cubic-bezier(0.3, 0, 0.2, 1), opacity 0.28s ease-in; }
+:root[data-os="mac"] .ring.fly { transform: translate(40px, -24px) scale(0.4); }
+
+.ring-disc { position: absolute; inset: 0; border-radius: 50%; background: var(--hub-bg); border: 1px solid var(--surface-line); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.16); }
+.ring-svg { position: absolute; inset: 0; width: 72px; height: 72px; transform: rotate(-90deg); }
+.ring-svg circle { fill: none; stroke-width: 3.5; }
+.ring-svg .track { stroke: var(--line); }
+.ring-svg .prog { stroke: var(--accent-fg); stroke-linecap: round; stroke-dasharray: 201.06; stroke-dashoffset: 201.06; transition: stroke-dashoffset 0.12s linear; }
+.ring-in { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; text-align: center; }
+.ring-in .rl { font-size: 12px; font-weight: 600; line-height: 1.1; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ring-in .rp { font-size: 10.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ring-in svg { width: 26px; height: 26px; color: var(--accent-fg); }
+.ring-in svg.undone { width: 24px; height: 24px; color: var(--ink-2); }
+
+.ring-pill {
+  position: absolute; left: 82px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; gap: 10px; white-space: nowrap;
+  background: var(--surface); border: 1px solid var(--surface-line); border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22); padding: 6px 6px 6px 12px;
+  opacity: 0; transition: opacity 0.16s; pointer-events: none;
+}
+.ring.flip .ring-pill { left: auto; right: 82px; }
+.ring.done .ring-pill { opacity: 1; pointer-events: auto; }
+.ring-text { color: var(--ink-2); max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.ring-pill button {
+  font: inherit; font-size: 12.5px; height: 28px; padding: 0 12px; border-radius: 4px;
+  border: 1px solid var(--line); background: var(--hub-bg); color: var(--ink); cursor: pointer;
+}
+.ring-pill button:hover { background: var(--seg); }
+.ring-pill button[hidden] { display: none; }
+:root[data-os="mac"] .ring-pill { border-radius: 10px; }
+:root[data-os="mac"] .ring-pill button { border-radius: 7px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before { transition-duration: 0s !important; }
+}
+
+/* Shift+click on a slot: options for this one conversion. */
+.opts {
+  position: absolute; left: 96px; top: 34px; width: 300px; z-index: 5;
+  padding: 16px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--surface-line); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 14px;
+  animation: opts-in 0.16s cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+.opts[hidden] { display: none; }
+:root[data-os="mac"] .opts { border-radius: 12px; }
+@keyframes opts-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+.opts-head { display: flex; align-items: baseline; gap: 8px; }
+.opts-title { font-size: 15px; font-weight: 600; }
+.opts-sub { font-size: 12px; color: var(--ink-2); }
+.opts-fields { display: flex; flex-direction: column; gap: 12px; }
+.opts-field { display: flex; flex-direction: column; gap: 6px; }
+.opts-field .row { display: flex; justify-content: space-between; }
+.opts-field .val { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.opts input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+.opts select {
+  height: 32px; border-radius: 5px; border: 1px solid var(--surface-line);
+  background: var(--hub-bg); color: var(--ink); font: inherit; padding: 0 8px;
+}
+.opts-keep { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+.opts-keep input { accent-color: var(--accent); margin: 0; }
+.opts-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.opts-buttons button {
+  height: 32px; padding: 0 14px; border-radius: 5px; font: inherit; cursor: pointer;
+  border: 1px solid var(--surface-line); background: var(--hub-bg); color: var(--ink);
+}
+.opts-buttons .primary { border: 0; background: var(--accent); color: var(--on-accent); font-weight: 600; padding: 0 16px; }
+.opts select:focus-visible, .opts button:focus-visible, .opts input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+body.with-opts .wheel { opacity: 0.55; transition: opacity 0.15s; }

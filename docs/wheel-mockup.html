@@ -1,0 +1,764 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
+<title>Convertino Wheel</title>
+<style>
+/* Layout: a page header with platform + theme switches, one live "desktop" stage (Win11 Explorer or macOS Finder), then a five-step flow strip. */
+:root{
+  --page:#ECEEF1; --ink:#1B1B1F; --ink-2:#5E6068; --ink-3:#8A8C94; --line:rgba(0,0,0,.09);
+  --mica:#F3F3F3; --card:#FBFBFB; --card-solid:#FFFFFF; --hover:rgba(0,0,0,.037); --sel:rgba(0,95,184,.11); --sel-line:rgba(0,95,184,.32);
+  --accent:#005FB8; --accent-ink:#FFFFFF; --accent-soft:rgba(0,95,184,.14);
+  --acrylic:rgba(250,250,250,.70); --acrylic-line:rgba(0,0,0,.10); --seg:rgba(0,0,0,.028); --seg-line:rgba(0,0,0,.06);
+  --win-line:rgba(0,0,0,.14); --shadow:0 18px 50px rgba(20,24,32,.22),0 2px 8px rgba(20,24,32,.10);
+  --wall-base:#D6DDE5; --wall-a:#A7C1DA; --wall-b:#E4C9B3; --folder:#E9B43C; --tile:#FFFFFF;
+  --m-accent:#007AFF; --m-accent-soft:rgba(0,122,255,.16); --m-vib:rgba(244,244,246,.72); --m-vib-line:rgba(0,0,0,.12); --m-seg:rgba(0,0,0,.035);
+  --m-win:#FFFFFF; --m-bar:#F6F6F6; --m-side:rgba(232,232,236,.92); --m-stripe:#F4F5F5; --m-folder:#3AA0F2; --mw-base:#C7D0DE; --mw-a:#8EB2E8; --mw-b:#EFC39C;
+  --f-mac:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
+  --f-ui:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+  --f-display:"Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,sans-serif;
+  --f-mono:"Cascadia Mono","Cascadia Code",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --page:#131316; --ink:#FFFFFF; --ink-2:#C8C8CF; --ink-3:#8E8E96; --line:rgba(255,255,255,.08);
+  --mica:#202020; --card:#2B2B2B; --card-solid:#2C2C2C; --hover:rgba(255,255,255,.05); --sel:rgba(96,205,255,.13); --sel-line:rgba(96,205,255,.35);
+  --accent:#60CDFF; --accent-ink:#000000; --accent-soft:rgba(96,205,255,.16);
+  --acrylic:rgba(40,40,40,.68); --acrylic-line:rgba(255,255,255,.10); --seg:rgba(255,255,255,.035); --seg-line:rgba(255,255,255,.06);
+  --win-line:rgba(255,255,255,.10); --shadow:0 18px 50px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);
+  --wall-base:#14171C; --wall-a:#1D3A55; --wall-b:#4A3226; --folder:#E0A92E; --tile:#3A3A3A;
+  --m-accent:#0A84FF; --m-accent-soft:rgba(10,132,255,.24); --m-vib:rgba(36,36,38,.62); --m-vib-line:rgba(255,255,255,.14); --m-seg:rgba(255,255,255,.045);
+  --m-win:#1E1E1E; --m-bar:#2A2A2C; --m-side:rgba(44,44,46,.92); --m-stripe:#242426; --m-folder:#3AA0F2; --mw-base:#111827; --mw-a:#233F6E; --mw-b:#5A3A24; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --page:#131316; --ink:#FFFFFF; --ink-2:#C8C8CF; --ink-3:#8E8E96; --line:rgba(255,255,255,.08);
+  --mica:#202020; --card:#2B2B2B; --card-solid:#2C2C2C; --hover:rgba(255,255,255,.05); --sel:rgba(96,205,255,.13); --sel-line:rgba(96,205,255,.35);
+  --accent:#60CDFF; --accent-ink:#000000; --accent-soft:rgba(96,205,255,.16);
+  --acrylic:rgba(40,40,40,.68); --acrylic-line:rgba(255,255,255,.10); --seg:rgba(255,255,255,.035); --seg-line:rgba(255,255,255,.06);
+  --win-line:rgba(255,255,255,.10); --shadow:0 18px 50px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);
+  --wall-base:#14171C; --wall-a:#1D3A55; --wall-b:#4A3226; --folder:#E0A92E; --tile:#3A3A3A;
+  --m-accent:#0A84FF; --m-accent-soft:rgba(10,132,255,.24); --m-vib:rgba(36,36,38,.62); --m-vib-line:rgba(255,255,255,.14); --m-seg:rgba(255,255,255,.045);
+  --m-win:#1E1E1E; --m-bar:#2A2A2C; --m-side:rgba(44,44,46,.92); --m-stripe:#242426; --m-folder:#3AA0F2; --mw-base:#111827; --mw-a:#233F6E; --mw-b:#5A3A24; color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--page);color:var(--ink);font-family:var(--f-ui);font-size:14px;line-height:1.45}
+.wrap{max-width:1160px;margin:0 auto;padding-inline:20px;padding-block:28px 48px;display:flex;flex-direction:column;gap:20px}
+@media (max-width:600px){.wrap{padding-inline:16px;padding-block:18px 36px}}
+
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.brand h1{font-family:var(--f-display);font-weight:600;font-size:28px;letter-spacing:-.01em;margin:0;line-height:1.1}
+.brand p{margin:2px 0 0;color:var(--ink-2);max-width:60ch}
+.logo{width:40px;height:40px;flex:none}
+.seg-ctl{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px;gap:2px}
+.seg-ctl button{font:inherit;font-size:13px;color:var(--ink-2);background:none;border:0;border-radius:5px;padding:5px 12px;cursor:pointer}
+.seg-ctl button[aria-pressed="true"]{background:var(--card-solid);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.seg-ctl button:focus-visible,button:focus-visible,.row:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+.try{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;color:var(--ink-2);font-size:13px}
+.try b{color:var(--ink);font-weight:600}
+kbd{font-family:var(--f-mono);font-size:11.5px;background:var(--card-solid);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 6px;color:var(--ink)}
+
+/* ---------- stage ---------- */
+.stage{position:relative;height:clamp(540px,72vh,660px);border-radius:12px;overflow:hidden;isolation:isolate;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.wall{position:absolute;inset:0;background:
+  radial-gradient(55% 75% at 12% 18%,var(--wall-a),transparent 62%),
+  radial-gradient(50% 70% at 88% 86%,var(--wall-b),transparent 60%),var(--wall-base)}
+.explorer{position:absolute;inset:26px 26px 26px 26px;background:var(--mica);border:1px solid var(--win-line);border-radius:8px;box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+@media (max-width:700px){.explorer{inset:10px}}
+.titlebar{display:flex;align-items:flex-end;height:40px;padding-left:8px;gap:4px}
+.tab{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:8px 8px 0 0;padding:0 12px;height:32px;font-size:12px;min-width:0;max-width:220px}
+.tab span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tab .x{color:var(--ink-3);margin-left:18px}
+.plus{color:var(--ink-2);padding:0 10px;height:32px;display:flex;align-items:center}
+.winctl{margin-left:auto;display:flex;align-self:stretch}
+.winctl span{width:46px;display:flex;align-items:center;justify-content:center;color:var(--ink-2)}
+.navbar{display:flex;align-items:center;gap:6px;background:var(--card);padding:6px 10px;border-bottom:1px solid var(--line)}
+.navbtn{color:var(--ink-3);width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex:none}
+.addr{flex:1;min-width:0;display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:4px;background:var(--mica);font-size:12.5px;white-space:nowrap;overflow:hidden}
+.addr .sep{color:var(--ink-3)}
+.search{width:220px;flex:none;height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid var(--line);border-radius:4px;background:var(--mica);color:var(--ink-3);font-size:12.5px}
+@media (max-width:760px){.search{display:none}}
+.cmdbar{display:flex;align-items:center;gap:2px;background:var(--card);padding:6px 10px;border-bottom:1px solid var(--line);flex-wrap:nowrap;overflow:hidden}
+.cmd{display:flex;align-items:center;gap:6px;height:30px;padding:0 9px;border-radius:4px;color:var(--ink);font-size:12.5px;white-space:nowrap}
+.cmd.ic{color:var(--ink-2);padding:0 7px}
+.vsep{width:1px;height:20px;background:var(--line);margin:0 4px;flex:none}
+.cmd-convert{margin-left:auto;font:inherit;font-size:12.5px;display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;border-radius:4px;border:1px solid var(--line);background:var(--card-solid);color:var(--ink);cursor:pointer;white-space:nowrap}
+.cmd-convert:hover{background:var(--hover)}
+.cmd-convert kbd{font-size:10.5px;padding:0 4px}
+@media (max-width:760px){.cmdbar .hide-sm{display:none}}
+.body{flex:1;display:flex;min-height:0}
+.side{width:190px;flex:none;padding:8px 6px;display:flex;flex-direction:column;gap:1px;border-right:1px solid var(--line);font-size:12.5px;overflow:hidden}
+.side div{display:flex;align-items:center;gap:10px;height:30px;padding:0 10px;border-radius:4px;white-space:nowrap}
+.side .on{background:var(--hover);position:relative}
+.side .on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:2px;background:var(--accent)}
+.side hr{border:0;border-top:1px solid var(--line);margin:6px 8px;width:auto}
+@media (max-width:760px){.side{display:none}}
+.list{flex:1;min-width:0;overflow:auto;padding:4px 6px 10px;font-size:12.5px;position:relative}
+.lhead,.row{display:grid;grid-template-columns:minmax(0,1fr) 150px 170px 96px;align-items:center;gap:0 12px;padding:0 10px}
+.lhead{height:32px;color:var(--ink-2);font-size:12px;border-bottom:1px solid var(--line);margin-bottom:2px}
+.lhead span:last-child,.row .c-size{text-align:right;font-variant-numeric:tabular-nums}
+.row{height:32px;border-radius:4px;border:1px solid transparent;cursor:default}
+.row:hover{background:var(--hover)}
+.row[aria-selected="true"]{background:var(--sel);border-color:var(--sel-line)}
+.row.fresh{animation:fresh 2.4s ease-out}
+@keyframes fresh{0%,35%{background:var(--accent-soft);border-color:var(--accent)}}
+.c-name{display:flex;align-items:center;gap:10px;min-width:0}
+.c-name .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-date,.c-type,.c-size{color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:900px){.lhead,.row{grid-template-columns:minmax(0,1fr) 150px 88px}.c-type{display:none}}
+@media (max-width:560px){.lhead,.row{grid-template-columns:minmax(0,1fr) 80px}.c-date{display:none}}
+.status{height:28px;display:flex;align-items:center;gap:18px;padding:0 14px;font-size:12px;color:var(--ink-2);border-top:1px solid var(--line);white-space:nowrap;overflow:hidden}
+
+/* plain context menu */
+.ctx{position:absolute;z-index:5;width:230px;background:var(--acrylic);backdrop-filter:blur(30px) saturate(1.5);-webkit-backdrop-filter:blur(30px) saturate(1.5);border:1px solid var(--acrylic-line);border-radius:8px;box-shadow:var(--shadow);padding:4px;font-size:12.5px}
+.ctx div{height:30px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:4px}
+.ctx div:hover{background:var(--hover)}
+.ctx em{font-style:normal;margin-left:auto;color:var(--ink-3);font-size:11.5px}
+.ctx hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+
+/* ---------- wheel ---------- */
+.overlay{position:absolute;inset:0;z-index:10;outline:none}
+.wheel{position:absolute;width:var(--d);height:var(--d);border-radius:50%;
+  background:var(--acrylic);backdrop-filter:blur(28px) saturate(1.6);-webkit-backdrop-filter:blur(28px) saturate(1.6);
+  border:1px solid var(--acrylic-line);box-shadow:var(--shadow);
+  transform:scale(.86);opacity:0;transition:transform .2s cubic-bezier(.1,.9,.2,1),opacity .14s ease-out}
+.wheel.open{transform:scale(1);opacity:1}
+.wheel.closing{transform:scale(.9);opacity:0;transition-duration:.12s}
+.wheel>svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.hub svg{flex:none}
+.seg{fill:var(--seg);stroke:var(--seg-line);stroke-width:1;transition:fill .12s}
+.seg.on{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.arc{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;opacity:0;transition:opacity .12s}
+.arc.on{opacity:1}
+.slot{position:absolute;width:78px;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;pointer-events:none;color:var(--ink);
+  opacity:0;transition:opacity .18s ease-out,transform .18s cubic-bezier(.1,.9,.2,1)}
+.wheel.open .slot{opacity:1}
+.slot .lbl{font-size:12.5px;font-weight:600;line-height:1.1}
+.slot .tag{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3)}
+.slot .key{position:absolute;top:-14px;font-family:var(--f-mono);font-size:10px;color:var(--ink-3)}
+.slot svg{position:static;width:20px;height:20px;color:var(--ink-2)}
+.slot.on{transform:translate(-50%,-50%) scale(1.06)}
+.slot.on svg,.slot.on .lbl{color:var(--accent)}
+.hub{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:var(--hub);height:var(--hub);border-radius:50%;background:var(--card-solid);border:1px solid var(--line);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;padding:8px}
+.hub .hn{font-size:11.5px;font-weight:600;max-width:calc(var(--hub) - 22px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hub .hm{font-size:10.5px;color:var(--ink-2);white-space:nowrap}
+.hint{position:absolute;transform:translateX(-50%);width:max-content;max-width:min(400px,calc(100% - 24px));background:var(--acrylic);backdrop-filter:blur(28px) saturate(1.6);-webkit-backdrop-filter:blur(28px) saturate(1.6);
+  border:1px solid var(--acrylic-line);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);padding:7px 12px;font-size:12.5px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;justify-content:center;
+  opacity:0;transition:opacity .16s .06s}
+.hint.show{opacity:1}
+.hint .ht{font-weight:600}
+.hint .hs{color:var(--ink-2)}
+.hint .hk{color:var(--ink-3);font-size:11.5px;width:100%;text-align:center}
+.chips{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+.chip{font:inherit;font-size:12px;border:1px solid var(--line);background:var(--card-solid);color:var(--ink);border-radius:4px;padding:3px 9px;cursor:pointer}
+.chip[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+.go{font:inherit;font-size:12px;font-weight:600;border:0;border-radius:4px;background:var(--accent);color:var(--accent-ink);padding:4px 12px;cursor:pointer}
+
+/* ---------- progress pill + toast ---------- */
+.pill{position:absolute;z-index:11;width:280px;transform:translate(-50%,-50%);background:var(--acrylic);backdrop-filter:blur(28px) saturate(1.6);-webkit-backdrop-filter:blur(28px) saturate(1.6);
+  border:1px solid var(--acrylic-line);border-radius:10px;box-shadow:var(--shadow);padding:10px 12px;display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;align-items:center;font-size:12px;
+  animation:pop .2s cubic-bezier(.1,.9,.2,1)}
+@keyframes pop{from{transform:translate(-50%,-50%) scale(.9);opacity:0}}
+.pill .pt{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.pill .pp{color:var(--ink-2);font-variant-numeric:tabular-nums}
+.bar{grid-column:1/-1;height:3px;border-radius:2px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:2px}
+.toasts{position:absolute;z-index:12;right:14px;bottom:14px;display:flex;flex-direction:column;gap:8px;width:min(350px,calc(100% - 28px))}
+.toast{background:var(--acrylic);backdrop-filter:blur(30px) saturate(1.6);-webkit-backdrop-filter:blur(30px) saturate(1.6);border:1px solid var(--acrylic-line);border-radius:8px;box-shadow:var(--shadow);
+  padding:12px 14px;font-size:12.5px;display:flex;flex-direction:column;gap:6px;animation:slide .28s cubic-bezier(.1,.9,.2,1)}
+@keyframes slide{from{transform:translateX(40px);opacity:0}}
+.toast.out{opacity:0;transform:translateX(30px);transition:.2s}
+.tapp{display:flex;align-items:center;gap:8px;color:var(--ink-2);font-size:11.5px}
+.tapp .logo{width:16px;height:16px}
+.tapp .tx{margin-left:auto;cursor:pointer;padding:0 2px}
+.ttl{font-weight:600;font-size:13.5px}
+.tbody{color:var(--ink-2);overflow-wrap:anywhere}
+.tbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+.tbtns button{font:inherit;font-size:12.5px;height:30px;border-radius:4px;border:1px solid var(--line);background:var(--card-solid);color:var(--ink);cursor:pointer}
+.tbtns button:hover{background:var(--hover)}
+
+/* ---------- flow strip ---------- */
+.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:0;padding:0;list-style:none;counter-reset:s}
+@media (max-width:900px){.flow{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.flow{grid-template-columns:1fr}}
+.flow li{counter-increment:s;padding:14px 16px;border-top:2px solid var(--line);display:flex;flex-direction:column;gap:4px;min-width:0}
+.flow li::before{content:counter(s);font-family:var(--f-mono);font-size:11.5px;color:var(--accent)}
+.flow b{font-size:14px}
+.flow span{color:var(--ink-2);font-size:13px}
+.foot{color:var(--ink-3);font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px 16px}
+.foot a{color:var(--accent)}
+
+.ctls{display:flex;flex-wrap:wrap;gap:8px}
+/* ---------- macOS ---------- */
+.stage[data-os="mac"]{--accent:var(--m-accent);--accent-ink:#FFFFFF;--accent-soft:var(--m-accent-soft);--acrylic:var(--m-vib);--acrylic-line:var(--m-vib-line);--seg:var(--m-seg);--seg-line:transparent;--folder:var(--m-folder);font-family:var(--f-mac)}
+.stage[data-os="mac"] .wall{background:radial-gradient(60% 80% at 82% 8%,var(--mw-a),transparent 60%),radial-gradient(55% 70% at 8% 96%,var(--mw-b),transparent 62%),var(--mw-base)}
+.finder{position:absolute;inset:30px 40px;background:var(--m-win);border:.5px solid var(--win-line);border-radius:12px;box-shadow:0 22px 60px rgba(0,0,0,.28),0 0 0 .5px rgba(0,0,0,.18);display:flex;overflow:hidden;font-size:13px}
+@media (max-width:700px){.finder{inset:10px}}
+.fside{width:180px;flex:none;background:var(--m-side);padding:12px 10px;display:flex;flex-direction:column;gap:1px;border-right:.5px solid var(--line);overflow:hidden}
+.lights{display:flex;gap:8px;padding:4px 6px 14px}
+.lights i{width:12px;height:12px;border-radius:50%;background:#FF5F57;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.18)}
+.lights i:nth-child(2){background:#FEBC2E}.lights i:nth-child(3){background:#28C840}
+.fside h4{margin:10px 8px 4px;font-size:11px;font-weight:600;color:var(--ink-3)}
+.fside .it{display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:6px;white-space:nowrap}
+.fside .it b{font-weight:400;color:var(--m-accent);width:16px;text-align:center}
+.fside .on{background:rgba(128,128,128,.2)}
+@media (max-width:760px){.fside{display:none}}
+.fmain{flex:1;min-width:0;display:flex;flex-direction:column}
+.ftool{height:52px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px 0 16px;background:var(--m-bar);border-bottom:.5px solid var(--line)}
+.fnav{color:var(--ink-3);font-size:18px;letter-spacing:8px}
+.ftitle{font-weight:600;white-space:nowrap}
+.ftools{margin-left:auto;display:flex;align-items:center;gap:14px;color:var(--ink-2)}
+.ftools .cmd-convert{margin-left:0;border-radius:6px}
+@media (max-width:760px){.ftools .hide-sm{display:none}}
+.finder .list{padding:0 8px 8px}
+.finder .lhead,.finder .row{grid-template-columns:minmax(0,1fr) 180px 80px 170px}
+.finder .lhead{height:28px;font-size:11.5px;border-bottom:.5px solid var(--line);margin-bottom:0}
+.finder .lhead span:last-child{text-align:left}
+.finder .lhead .c-size{text-align:right}
+.finder .row{height:24px;border:0;border-radius:5px}
+.finder .row:hover{background:transparent}
+.finder #frows .row:nth-child(even){background:var(--m-stripe)}
+.finder #frows .row[aria-selected="true"]{background:var(--m-accent);color:#FFFFFF}
+.finder .row[aria-selected="true"] .c-date,.finder .row[aria-selected="true"] .c-size,.finder .row[aria-selected="true"] .c-kind{color:rgba(255,255,255,.85)}
+.finder .row.fresh{animation:none}
+.c-kind{color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:900px){.finder .lhead,.finder .row{grid-template-columns:minmax(0,1fr) 160px 76px}.finder .c-kind{display:none}}
+@media (max-width:560px){.finder .lhead,.finder .row{grid-template-columns:minmax(0,1fr) 72px}.finder .c-date{display:none}}
+.fpath{height:24px;flex:none;display:flex;align-items:center;padding:0 12px;font-size:11.5px;color:var(--ink-2);border-top:.5px solid var(--line);white-space:nowrap;overflow:hidden}
+.fstatus{height:22px;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ink-3);border-top:.5px solid var(--line);white-space:nowrap}
+.stage[data-os="mac"] .wheel{border-width:.5px;box-shadow:0 20px 60px rgba(0,0,0,.3),0 0 0 .5px rgba(0,0,0,.12)}
+.stage[data-os="mac"] .seg.on{fill:var(--accent);stroke:none}
+.stage[data-os="mac"] .arc{display:none}
+.stage[data-os="mac"] .slot.on svg,.stage[data-os="mac"] .slot.on .lbl,.stage[data-os="mac"] .slot.on .key,.stage[data-os="mac"] .slot.on .tag{color:#FFFFFF}
+.stage[data-os="mac"] .hub{background:var(--m-win);border-width:.5px}
+.stage[data-os="mac"] .hint,.stage[data-os="mac"] .pill{border-radius:10px;border-width:.5px}
+.stage[data-os="mac"] .go{border-radius:6px}
+.stage[data-os="mac"] .toasts{top:14px;bottom:auto}
+.stage[data-os="mac"] .toast{border-radius:16px;border-width:.5px;animation-name:drop}
+@keyframes drop{from{transform:translateY(-16px);opacity:0}}
+.stage[data-os="mac"] .tbtns button{border-radius:8px}
+.stage[data-os="mac"] .ctx{border-radius:8px;padding:5px;width:240px;font-size:13px;border-width:.5px}
+.stage[data-os="mac"] .ctx div{height:24px}
+.stage[data-os="mac"] .ctx div:hover{background:var(--accent);color:#FFFFFF}
+.stage[data-os="mac"] .ctx div:hover em{color:rgba(255,255,255,.8)}
+@media (prefers-reduced-motion:reduce){*,*::before{transition-duration:0s!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="var(--card-solid)" stroke="var(--line)"/><g fill="none" stroke="var(--ink-3)" stroke-width="1.2"><path d="M20 2v10M20 28v10M2 20h10M28 20h10M7.3 7.3l7.1 7.1M25.6 25.6l7.1 7.1M32.7 7.3l-7.1 7.1M14.4 25.6l-7.1 7.1"/></g><path d="M20 2A18 18 0 0 1 32.7 7.3L25.6 14.4A8 8 0 0 0 20 12Z" fill="var(--accent)"/><circle cx="20" cy="20" r="7" fill="var(--card-solid)" stroke="var(--line)"/></svg>
+      <div><h1>Convertino</h1><p>Interactive mockup of the convert wheel for Windows 11 and macOS. Everything below is clickable.</p></div>
+    </div>
+    <div class="ctls">
+    <div class="seg-ctl" role="group" aria-label="Platform">
+      <button type="button" id="os-win" data-os="win">Windows 11</button>
+      <button type="button" id="os-mac" data-os="mac">macOS</button>
+    </div>
+    <div class="seg-ctl" role="group" aria-label="Theme">
+      <button type="button" id="th-system" data-t="system">System</button>
+      <button type="button" id="th-light" data-t="light">Light</button>
+      <button type="button" id="th-dark" data-t="dark">Dark</button>
+    </div>
+    </div>
+  </header>
+
+  <div class="try" id="try"></div>
+
+  <div class="stage" id="stage" data-os="win">
+    <div class="wall"></div>
+    <div class="explorer" id="win">
+      <div class="titlebar">
+        <div class="tab"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10m-4-4l4 4 4-4M5 19h14" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Downloads</span><span class="x">✕</span></div>
+        <div class="plus">+</div>
+        <div class="winctl"><span>&#8212;</span><span>&#9633;</span><span>&#10005;</span></div>
+      </div>
+      <div class="navbar">
+        <span class="navbtn">&#8592;</span><span class="navbtn">&#8594;</span><span class="navbtn">&#8593;</span><span class="navbtn">&#8635;</span>
+        <div class="addr"><span>This PC</span><span class="sep">›</span><span>Downloads</span></div>
+        <div class="search">&#9906; Search Downloads</div>
+      </div>
+      <div class="cmdbar">
+        <span class="cmd">&#65291; New &#709;</span><span class="vsep"></span>
+        <span class="cmd ic hide-sm">&#9986;</span><span class="cmd ic hide-sm">&#10697;</span><span class="cmd ic hide-sm">&#9998;</span><span class="cmd ic hide-sm">&#8631;</span><span class="cmd ic hide-sm">&#128465;&#xFE0E;</span>
+        <span class="vsep hide-sm"></span><span class="cmd hide-sm">&#8645; Sort &#709;</span><span class="cmd hide-sm">&#9776; View &#709;</span>
+        <button type="button" class="cmd-convert" id="hotkeyBtn" title="Simulates pressing the global hotkey">Convert <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>C</kbd></button>
+      </div>
+      <div class="body">
+        <nav class="side" aria-label="Places">
+          <div>&#8962;&nbsp; Home</div><div>&#9635;&nbsp; Gallery</div><hr>
+          <div>&#9634;&nbsp; Desktop</div><div class="on">&#8615;&nbsp; Downloads</div><div>&#9636;&nbsp; Documents</div><div>&#9638;&nbsp; Pictures</div><div>&#9835;&nbsp; Music</div><div>&#9654;&nbsp; Videos</div><hr>
+          <div>&#128421;&#xFE0E;&nbsp; This PC</div>
+        </nav>
+        <div class="list" id="list" role="grid" aria-label="Files in Downloads" aria-multiselectable="true">
+          <div class="lhead" role="row"><span>Name</span><span class="c-date">Date modified</span><span class="c-type">Type</span><span>Size</span></div>
+          <div id="rows"></div>
+        </div>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="finder" id="mac" hidden>
+      <nav class="fside" aria-label="Sidebar">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <h4>Favourites</h4>
+        <div class="it"><b>&#9678;</b>AirDrop</div><div class="it"><b>&#9719;</b>Recents</div><div class="it"><b>&#8984;</b>Applications</div>
+        <div class="it"><b>&#9645;</b>Desktop</div><div class="it"><b>&#9636;</b>Documents</div><div class="it on"><b>&#8595;</b>Downloads</div>
+        <h4>Locations</h4>
+        <div class="it"><b>&#9729;&#xFE0E;</b>iCloud Drive</div><div class="it"><b>&#9635;</b>Macintosh HD</div>
+      </nav>
+      <div class="fmain">
+        <div class="ftool">
+          <span class="fnav">&#8249;&#8250;</span><span class="ftitle">Downloads</span>
+          <span class="ftools"><span class="hide-sm">&#9776;</span><span class="hide-sm">&#8862;</span><span class="hide-sm">&#8679;</span>
+            <button type="button" class="cmd-convert" id="hotkeyBtnMac" title="Simulates pressing the global hotkey">Convert <kbd>&#8963;</kbd><kbd>&#8997;</kbd><kbd>C</kbd></button><span>&#9906;</span></span>
+        </div>
+        <div class="list flist" id="flist" role="grid" aria-label="Files in Downloads" aria-multiselectable="true">
+          <div class="lhead" role="row"><span>Name</span><span class="c-date">Date Modified</span><span class="c-size">Size</span><span class="c-kind">Kind</span></div>
+          <div id="frows"></div>
+        </div>
+        <div class="fpath">Macintosh HD &#8250; Users &#8250; crofty &#8250; Downloads</div>
+        <div class="fstatus" id="fstatus"></div>
+      </div>
+    </div>
+
+    <div class="ctx" id="ctx" hidden></div>
+    <div class="overlay" id="overlay" tabindex="-1" hidden>
+      <div class="wheel" id="wheel" role="menu" aria-label="Convert to"></div>
+      <div class="hint" id="hint" aria-live="polite"></div>
+    </div>
+    <div class="pill" id="pill" hidden></div>
+    <div class="toasts" id="toasts"></div>
+  </div>
+
+  <ol class="flow">
+    <li><b>Trigger</b><span>Hotkey on the selection, or Alt/Option+right-click a file. The normal menu never shows.</span></li>
+    <li><b>Wheel at cursor</b><span>Targets for that file family. Mixed selections split the ring by family.</span></li>
+    <li><b>Pick</b><span>Point and click, or press a number. Shift+click sets quality first.</span></li>
+    <li><b>Progress pill</b><span>The wheel shrinks into a pill where your cursor was. Keep working.</span></li>
+    <li><b>Done</b><span>A toast with Open folder and Undo. The new file lands next to the original.</span></li>
+  </ol>
+  <div class="foot"><span>Mockup only: conversions are simulated, sizes are estimates.</span><a href="https://claude.ai/code/artifact/b0f3dd09-4c90-45ce-9011-46a3c80540af" target="_blank" rel="noopener">Read the build plan</a></div>
+</div>
+
+<script>
+(() => {
+const LOGO = document.querySelector('.logo').outerHTML;
+const ICONS = {
+  image:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="9" r="1.4"/>',
+  audio:'<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+  video:'<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>',
+  doc:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 11h6M9 14h6M9 17h4"/>',
+  table:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16M4 14.5h16M10 5v14"/>',
+  code:'<path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/>',
+  archive:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v2M12 8v2M12 12v2"/><rect x="10.5" y="15" width="3" height="3" rx=".5"/>',
+  compress:'<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
+  split:'<circle cx="6" cy="7" r="2.5"/><circle cx="6" cy="17" r="2.5"/><path d="M8 8.5L20 17M8 15.5L20 7"/>',
+  merge:'<path d="M6 4v5c0 3 6 3 6 6v5M18 4v5c0 3-6 3-6 6"/>',
+  resize:'<path d="M4 14v6h6M20 10V4h-6M4 20l6-6M20 4l-6 6"/>',
+  trim:'<path d="M4 12h1M7 9v6M10 5v14M13 8v8M16 10v4M19 12h1"/>',
+  extract:'<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M12 10v6M9 13l3 3 3-3"/>',
+  frames:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4"/>',
+  gif:'<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 10.5a2 2 0 100 3h1v-1.5M12 10v4M15 14v-4h2.5M15 12h2"/>',
+  level:'<path d="M4 12h2M8 8v8M12 4v16M16 8v8M20 12h0"/><path d="M3 20h18"/>',
+  more:'<circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/>',
+  back:'<path d="M10 6l-6 6 6 6M4 12h16"/>',
+  pdf:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M8.5 16.5c2-1 4.5-5.5 3.5-6.5s-1 3 3.5 5"/>'
+};
+const ico = (n, s=20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]||ICONS.doc}</svg>`;
+
+const FAM = {
+  pdf:{label:'PDF', color:'#C4262E'}, audio:{label:'Audio', color:'#7A4FB0'}, image:{label:'Image', color:'#2F7D32'},
+  video:{label:'Video', color:'#C4531A'}, data:{label:'Data', color:'#107C41'}, archive:{label:'Archive', color:'#9A6B00'}, doc:{label:'Document', color:'#185ABD'}
+};
+const EXT = {pdf:['pdf','PDF Document'],wav:['audio','WAV Audio'],mp3:['audio','MP3 File'],flac:['audio','FLAC File'],aac:['audio','AAC File'],ogg:['audio','OGG File'],opus:['audio','OPUS File'],m4a:['audio','MPEG-4 Audio'],aiff:['audio','AIFF File'],
+  heic:['image','HEIC File'],jpg:['image','JPG File'],png:['image','PNG File'],webp:['image','WEBP File'],avif:['image','AVIF File'],ico:['image','ICO File'],tiff:['image','TIFF File'],bmp:['image','BMP File'],gif:['image','GIF File'],
+  mov:['video','QuickTime Movie'],mp4:['video','MP4 Video'],webm:['video','WEBM Video'],mkv:['video','MKV Video'],avi:['video','AVI Video'],
+  csv:['data','CSV File'],xlsx:['data','Microsoft Excel Worksheet'],json:['data','JSON File'],yaml:['data','YAML File'],tsv:['data','TSV File'],md:['doc','Markdown File'],
+  zip:['archive','Compressed (zipped) Folder'],'7z':['archive','7Z Archive'],gz:['archive','GZ Archive'],
+  docx:['doc','Microsoft Word Document'],txt:['doc','Text Document'],html:['doc','HTML Document'],odt:['doc','OpenDocument Text'],rtf:['doc','Rich Text Format']};
+const extOf = n => { const m = n.toLowerCase().match(/\.([a-z0-9]+)$/); return m ? m[1] : ''; };
+
+let files = [
+  {id:'f1',name:'Q3-report.pdf',size:2.46e6,date:'28-09-2026 18:42',meta:'12 pages',count:12},
+  {id:'f2',name:'voice-memo.wav',size:38.2e6,date:'29-09-2026 09:15',meta:'3:36 min'},
+  {id:'f3',name:'holiday-goa.heic',size:3.1e6,date:'21-09-2026 17:03',meta:'4032 × 3024'},
+  {id:'f4',name:'product-clip.mov',size:184e6,date:'26-09-2026 12:30',meta:'0:42 · 4K',count:42},
+  {id:'f5',name:'orders-sept.csv',size:412e3,date:'30-09-2026 08:05',meta:'2,318 rows'},
+  {id:'f6',name:'brand-assets.zip',size:56e6,date:'24-09-2026 20:11',meta:'148 files'},
+  {id:'f7',name:'proposal.docx',size:88e3,date:'27-09-2026 11:48',meta:'6 pages'},
+  {id:'f8',name:'logo-draft.png',size:640e3,date:'29-09-2026 22:36',meta:'2048 × 2048'},
+  {id:'f9',name:'invoice-0917.pdf',size:182e3,date:'17-09-2026 10:02',meta:'2 pages',count:2}
+];
+files.forEach(f => { f.ext = extOf(f.name); const e = EXT[f.ext]; f.fam = e[0]; f.type = e[1]; });
+const MACKIND = {pdf:'PDF document',wav:'Waveform audio',mp3:'MP3 audio',flac:'FLAC audio',aac:'AAC audio',m4a:'Apple MPEG-4 audio',ogg:'Ogg Vorbis audio',opus:'Opus audio',aiff:'AIFF audio',
+  heic:'HEIF image',jpg:'JPEG image',png:'PNG image',webp:'WebP image',avif:'AVIF image',ico:'Windows icon image',tiff:'TIFF image',bmp:'Windows BMP image',gif:'GIF image',
+  mov:'QuickTime movie',mp4:'MPEG-4 movie',webm:'WebM video',mkv:'Matroska video',avi:'AVI movie',csv:'Comma-separated values',xlsx:'Microsoft Excel workbook',json:'JSON',yaml:'YAML',tsv:'Tab-separated values',md:'Markdown document',
+  zip:'ZIP archive','7z':'7-Zip archive',gz:'gzip compressed archive',docx:'Microsoft Word document',txt:'Plain text document',html:'HTML text',odt:'OpenDocument text',rtf:'RTF document'};
+
+const BIT = {name:'Bitrate', vals:['128 kbps','192 kbps','256 kbps','320 kbps'], d:3, scale:[.4,.6,.8,1]};
+const DPI = {name:'Resolution', vals:['72 DPI','150 DPI','300 DPI'], d:1, scale:[.4,1,3.2]};
+const Q = {name:'Quality', vals:['70','80','90','100'], d:2, scale:[.5,.7,1,1.8]};
+const T = {
+  pdf:{main:[
+    {k:'JPG',icon:'image',hint:'One image per page · 150 DPI',mode:'folder',folder:'pages',ext:'jpg',ratio:.16,opts:DPI},
+    {k:'PNG',icon:'image',hint:'Lossless image per page · 150 DPI',mode:'folder',folder:'pages',ext:'png',ratio:.4,opts:DPI},
+    {k:'WEBP',icon:'image',hint:'Smaller images, one per page',mode:'folder',folder:'pages',ext:'webp',ratio:.1},
+    {k:'TXT',icon:'doc',hint:'All text from every page',mode:'ext',ext:'txt',ratio:.02},
+    {k:'Split',icon:'split',hint:'One PDF per page',mode:'folder',folder:'split',ext:'pdf',ratio:1.05,done:'Split into pages'},
+    {k:'Compress',icon:'compress',hint:'Smaller PDF for email · images at 150 DPI',mode:'suffix',suffix:'compressed',ext:'pdf',ratio:.35,done:'Compressed',opts:{name:'Level',vals:['Light','Balanced','Strong'],d:1,scale:[1.6,1,.6]}},
+    {k:'Merge',icon:'merge',hint:'Combine the selected PDFs in name order',mode:'merge',ext:'pdf',multi:true,done:'Merged'}],
+   more:[
+    {k:'TIFF',icon:'image',hint:'One multi-page TIFF · 300 DPI',mode:'ext',ext:'tiff',ratio:5},
+    {k:'Grayscale',icon:'pdf',hint:'Black-and-white PDF for printing',mode:'suffix',suffix:'grayscale',ext:'pdf',ratio:.7,done:'Converted to grayscale'},
+    {k:'PDF/A',icon:'pdf',hint:'Archival PDF with fonts embedded',mode:'suffix',suffix:'PDF-A',ext:'pdf',ratio:1.1}]},
+  audio:{main:[
+    {k:'MP3',icon:'audio',hint:'320 kbps · plays everywhere',mode:'ext',ext:'mp3',ratio:.227,opts:BIT},
+    {k:'FLAC',icon:'audio',hint:'Lossless · about half the size',mode:'ext',ext:'flac',ratio:.55},
+    {k:'AAC',icon:'audio',hint:'256 kbps · good quality, small',mode:'ext',ext:'aac',ratio:.18,opts:BIT},
+    {k:'OGG',icon:'audio',hint:'Vorbis · quality 6',mode:'ext',ext:'ogg',ratio:.15},
+    {k:'OPUS',icon:'audio',hint:'96 kbps · best for voice',mode:'ext',ext:'opus',ratio:.07},
+    {k:'M4A',icon:'audio',hint:'AAC in MP4 · plays on iPhone',mode:'ext',ext:'m4a',ratio:.18},
+    {k:'Trim',icon:'trim',hint:'Cut silence from start and end · stays WAV',mode:'suffix',suffix:'trimmed',ext:'wav',ratio:.9,done:'Trimmed silence'}],
+   more:[
+    {k:'AIFF',icon:'audio',hint:'Uncompressed · for Logic and Pro Tools',mode:'ext',ext:'aiff',ratio:1},
+    {k:'ALAC',icon:'audio',hint:'Apple Lossless in M4A',mode:'suffix',suffix:'alac',ext:'m4a',ratio:.55},
+    {k:'Normalize',icon:'level',hint:'Loudness to −14 LUFS · stays WAV',mode:'suffix',suffix:'normalized',ext:'wav',ratio:1,done:'Normalized'}]},
+  image:{main:[
+    {k:'JPG',icon:'image',hint:'Quality 90 · keeps EXIF',mode:'ext',ext:'jpg',ratio:.9,opts:Q},
+    {k:'PNG',icon:'image',hint:'Lossless · keeps transparency',mode:'ext',ext:'png',ratio:2.4},
+    {k:'WEBP',icon:'image',hint:'Quality 85 · about 30% smaller than JPG',mode:'ext',ext:'webp',ratio:.6,opts:Q},
+    {k:'AVIF',icon:'image',hint:'Smallest file · modern browsers',mode:'ext',ext:'avif',ratio:.4},
+    {k:'PDF',icon:'pdf',hint:'One page per image · a multi-select makes one PDF',mode:'ext',ext:'pdf',ratio:1},
+    {k:'ICO',icon:'image',hint:'16 to 256 px sizes in one icon',mode:'ext',ext:'ico',ratio:.2},
+    {k:'Resize',icon:'resize',hint:'Longest side 1920 px · same format',mode:'suffix',suffix:'1920px',ext:'same',ratio:.35,done:'Resized',opts:{name:'Longest side',vals:['1280 px','1920 px','2560 px','3840 px'],d:1,scale:[.18,.35,.6,1]}}],
+   more:[
+    {k:'TIFF',icon:'image',hint:'Uncompressed · for print',mode:'ext',ext:'tiff',ratio:6},
+    {k:'BMP',icon:'image',hint:'Uncompressed bitmap',mode:'ext',ext:'bmp',ratio:7},
+    {k:'GIF',icon:'gif',hint:'256 colours',mode:'ext',ext:'gif',ratio:.8}]},
+  video:{main:[
+    {k:'MP4',icon:'video',hint:'H.264 · plays everywhere',mode:'ext',ext:'mp4',ratio:.22},
+    {k:'WEBM',icon:'video',hint:'VP9 · for websites',mode:'ext',ext:'webm',ratio:.16},
+    {k:'GIF',icon:'gif',hint:'480 px wide · 15 fps',mode:'ext',ext:'gif',ratio:.1},
+    {k:'MP3',icon:'audio',hint:'Extract the audio · 320 kbps',mode:'ext',ext:'mp3',ratio:.009,done:'Extracted audio'},
+    {k:'Compress',icon:'compress',hint:'H.265 · about a third of the size',mode:'suffix',suffix:'compressed',ext:'mp4',ratio:.12,done:'Compressed'},
+    {k:'720p',icon:'resize',hint:'Downscale to 1280 × 720 MP4',mode:'suffix',suffix:'720p',ext:'mp4',ratio:.05,done:'Downscaled to 720p'},
+    {k:'Frames',icon:'frames',hint:'One PNG per second',mode:'folder',folder:'frames',ext:'png',ratio:.02,done:'Exported frames'}],
+   more:[
+    {k:'MKV',icon:'video',hint:'Same streams, new container · instant',mode:'ext',ext:'mkv',ratio:1},
+    {k:'AVI',icon:'video',hint:'For older players',mode:'ext',ext:'avi',ratio:.3},
+    {k:'WAV',icon:'audio',hint:'Extract the audio uncompressed',mode:'ext',ext:'wav',ratio:.04,done:'Extracted audio'}]},
+  data:{main:[
+    {k:'XLSX',icon:'table',hint:'One sheet · header row frozen',mode:'ext',ext:'xlsx',ratio:.55},
+    {k:'JSON',icon:'code',hint:'Array of objects · keys from the header row',mode:'ext',ext:'json',ratio:2.1},
+    {k:'YAML',icon:'code',hint:'List of records',mode:'ext',ext:'yaml',ratio:1.9},
+    {k:'TSV',icon:'table',hint:'Tab separated',mode:'ext',ext:'tsv',ratio:1},
+    {k:'Markdown',icon:'doc',hint:'Table for docs and READMEs',mode:'ext',ext:'md',ratio:1.4}]},
+  archive:{main:[
+    {k:'Extract',icon:'extract',hint:'Unpack into a folder next to the archive',mode:'dir',ratio:1.3,done:'Extracted'},
+    {k:'7Z',icon:'archive',hint:'Re-pack with 7-Zip · about 20% smaller',mode:'ext',ext:'7z',ratio:.8,done:'Re-packed as 7Z'},
+    {k:'TAR.GZ',icon:'archive',hint:'For Linux and servers',mode:'ext',ext:'tar.gz',ratio:.95,done:'Re-packed as TAR.GZ'},
+    {k:'ZIP',icon:'archive',hint:'Standard ZIP',mode:'ext',ext:'zip',ratio:1}]},
+  doc:{main:[
+    {k:'PDF',icon:'pdf',hint:'Exported with LibreOffice · keeps layout · no Office needed',mode:'ext',ext:'pdf',ratio:1.9},
+    {k:'TXT',icon:'doc',hint:'Plain text only',mode:'ext',ext:'txt',ratio:.12},
+    {k:'HTML',icon:'code',hint:'Web page with images inline',mode:'ext',ext:'html',ratio:1.3},
+    {k:'Markdown',icon:'doc',hint:'Headings, lists and tables kept',mode:'ext',ext:'md',ratio:.15},
+    {k:'ODT',icon:'doc',hint:'OpenDocument for LibreOffice',mode:'ext',ext:'odt',ratio:.9},
+    {k:'RTF',icon:'doc',hint:'Rich text for older apps',mode:'ext',ext:'rtf',ratio:2.5}]}
+};
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+let OS = 'win';
+const stage = $('#stage'), overlay = $('#overlay'), wheelEl = $('#wheel'), hintEl = $('#hint');
+const kb = b => Math.max(1, Math.ceil(b/1024)).toLocaleString('en-IN') + ' KB';
+const human = b => b >= 1e9 ? (b/1e9).toFixed(2)+' GB' : b >= 1e6 ? (b/1e6).toFixed(1)+' MB' : Math.max(1,Math.round(b/1e3))+' KB';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const now = () => { const d = new Date(), p = n => String(n).padStart(2,'0'); return `${p(d.getDate())}-${p(d.getMonth()+1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+const tile = (fam, s=16) => {
+  if (fam === 'dir') return `<svg width="${s}" height="${s}" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 5.5A1.5 1.5 0 013.5 4h4l1.6 1.6h7.4A1.5 1.5 0 0118 7.1v8.4a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 15.5z" fill="var(--folder)"/></svg>`;
+  const c = (FAM[fam]||FAM.doc).color;
+  return `<svg width="${s}" height="${s*1.2}" viewBox="0 0 20 24" aria-hidden="true"><path d="M3.5 1h9L17 5.5v17H3.5z" fill="var(--tile)" stroke="var(--ink-3)" stroke-width="1"/><path d="M12.5 1v4.5H17" fill="none" stroke="var(--ink-3)" stroke-width="1"/><rect x="3.5" y="15" width="13.5" height="7.5" fill="${c}"/></svg>`;
+};
+let sel = new Set(), anchor = null, lastPt = null;
+const ptIn = e => { const r = stage.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
+stage.addEventListener('pointermove', e => { lastPt = ptIn(e); });
+
+/* ---------- explorer list ---------- */
+function sorted(){ return [...files].sort((a,b) => (b.dir?1:0)-(a.dir?1:0) || a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'})); }
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sept','Oct','Nov','Dec'];
+function macDate(str){
+  const [d, t] = str.split(' '), [dd, mm, yy] = d.split('-').map(Number), n = new Date();
+  if (dd === n.getDate() && mm === n.getMonth()+1 && yy === n.getFullYear()) return `Today at ${t}`;
+  return `${dd} ${MON.at(mm-1)} ${yy} at ${t}`;
+}
+const macSize = b => b < 1e3 ? Math.round(b) + ' bytes' : b < 1e6 ? Math.round(b/1e3) + ' KB' : b < 1e9 ? (b/1e6).toFixed(1) + ' MB' : (b/1e9).toFixed(2) + ' GB';
+function render(fresh=[]){
+  const mac = OS === 'mac', rowsEl = mac ? $('#frows') : $('#rows');
+  const row = f => `<div class="row${fresh.includes(f.id)?' fresh':''}" role="row" tabindex="-1" data-id="${f.id}" aria-selected="${sel.has(f.id)}">
+    <span class="c-name">${tile(f.dir?'dir':f.fam)}<span class="n">${esc(f.name)}</span></span>` + (mac
+    ? `<span class="c-date">${macDate(f.date)}</span><span class="c-size">${f.dir?'--':macSize(f.size)}</span><span class="c-kind">${f.dir?'Folder':esc(MACKIND[f.ext]||f.type)}</span></div>`
+    : `<span class="c-date">${f.date}</span><span class="c-type">${esc(f.type)}</span><span class="c-size">${f.dir?'':kb(f.size)}</span></div>`);
+  rowsEl.innerHTML = sorted().map(row).join('');
+  const s = files.filter(f => sel.has(f.id));
+  if (mac) $('#fstatus').textContent = `${s.length ? s.length + ' of ' : ''}${files.length} ${s.length ? 'selected' : 'items'}, 245.3 GB available`;
+  else $('#status').innerHTML = `<span>${files.length} items</span>${s.length ? `<span>${s.length} item${s.length>1?'s':''} selected${s.some(f=>f.dir)?'':'&nbsp; '+human(s.reduce((a,f)=>a+f.size,0))}</span>` : ''}`;
+  if (fresh.length){ const el = rowsEl.querySelector(`[data-id="${fresh[0]}"]`); el && el.scrollIntoView({block:'nearest'}); }
+}
+[$('#list'), $('#flist')].forEach(list => {
+list.addEventListener('click', e => {
+  hideCtx();
+  const row = e.target.closest('.row');
+  if (!row){ if (!e.target.closest('.lhead')){ sel.clear(); render(); } return; }
+  const id = row.dataset.id;
+  if (e.ctrlKey || e.metaKey){ sel.has(id) ? sel.delete(id) : sel.add(id); anchor = id; }
+  else if (e.shiftKey && anchor){ const ids = sorted().map(f=>f.id), a = ids.indexOf(anchor), b = ids.indexOf(id); sel = new Set(ids.slice(Math.min(a,b), Math.max(a,b)+1)); }
+  else { sel = new Set([id]); anchor = id; }
+  render();
+});
+list.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const row = e.target.closest('.row'), p = ptIn(e);
+  if (row && !sel.has(row.dataset.id)){ sel = new Set([row.dataset.id]); anchor = row.dataset.id; render(); }
+  if (e.altKey){ hideCtx(); if (sel.size) openWheel(p); return; }
+  if (row) showCtx(p); else hideCtx();
+});
+});
+const ctx = $('#ctx');
+const CTX = {
+  win:'<div>Open</div><div>Open with <em>›</em></div><div>Share</div><div>Copy as path <em>Ctrl+Shift+C</em></div><div>Properties <em>Alt+Enter</em></div><hr><div>Show more options</div>',
+  mac:'<div>Open</div><div>Open With <em>›</em></div><hr><div>Move to Trash</div><hr><div>Get Info</div><div>Rename</div><div>Compress</div><div>Duplicate</div><div>Quick Look</div><hr><div>Copy</div><div>Share…</div>'};
+function showCtx(p){ ctx.innerHTML = CTX[OS]; ctx.hidden = false; const W = stage.clientWidth, H = stage.clientHeight; ctx.style.left = Math.min(p.x, W - 240) + 'px'; ctx.style.top = Math.min(p.y, H - ctx.offsetHeight - 8) + 'px'; }
+function hideCtx(){ ctx.hidden = true; }
+ctx.addEventListener('click', hideCtx);
+document.addEventListener('pointerdown', e => { if (!ctx.hidden && !ctx.contains(e.target)) hideCtx(); });
+
+/* ---------- wheel ---------- */
+let W = null; // wheel state
+function targetsFor(fam, fs){
+  const srcExts = new Set(fs.map(f => extOf(f.name)));
+  const keep = s => !(s.mode === 'ext' && srcExts.size === 1 && s.ext === [...srcExts][0]) && !(s.multi && fs.length < 2);
+  let main = T[fam].main.filter(keep), more = (T[fam].more||[]).filter(keep);
+  if (main.length > 8){ more = main.slice(7).concat(more); main = main.slice(0,7); }
+  return {main, more};
+}
+function slotsFor(fs){
+  const fams = [...new Set(fs.map(f => f.fam))];
+  if (fams.length === 1){
+    const {main, more} = targetsFor(fams[0], fs);
+    const m = main.map(s => ({...s, fam:fams[0]}));
+    return {main: more.length ? m.concat({k:'More',icon:'more',isMore:true,hint:'More: ' + more.map(s=>s.k).join(', ')}) : m,
+            more: more.map(s => ({...s, fam:fams[0]})).concat({k:'Back',icon:'back',isBack:true,hint:'Back to the main ring'})};
+  }
+  const use = fams.slice(0,4), per = Math.floor(8/use.length);
+  return {main: use.flatMap(fam => targetsFor(fam, fs.filter(f=>f.fam===fam)).main.slice(0,per).map(s => ({...s, fam, tag:FAM[fam].label}))), more:[]};
+}
+function openWheel(p){
+  const fs = files.filter(f => sel.has(f.id) && !f.dir);
+  if (!fs.length){ note('Select a file first', 'Folders can’t be converted.'); return; }
+  const Wd = stage.clientWidth, Hd = stage.clientHeight;
+  const D = Math.round(Math.max(250, Math.min(340, Wd - 24, Hd - 110)));
+  const R = D/2, cx = Math.min(Math.max(p.x, R+10), Wd-R-10), cy = Math.min(Math.max(p.y, R+10), Hd-R-64);
+  const sets = slotsFor(fs);
+  W = {fs, D, cx, cy, sets, page:'main', slots:sets.main, active:-1, opt:null};
+  overlay.hidden = false;
+  wheelEl.style.cssText = `--d:${D}px;--hub:${Math.round(R*0.72)}px;left:${cx-R}px;top:${cy-R}px`;
+  hintEl.style.left = cx + 'px'; hintEl.style.top = (cy + R + 10) + 'px';
+  drawWheel();
+  wheelEl.classList.remove('open','closing');
+  requestAnimationFrame(() => requestAnimationFrame(() => { wheelEl.classList.add('open'); hintEl.classList.add('show'); }));
+  overlay.focus({preventScroll:true});
+}
+function sector(cx, cy, ri, ro, a0, a1){
+  const r = a => a*Math.PI/180, P = (rad, a) => `${(cx+rad*Math.cos(r(a))).toFixed(2)} ${(cy+rad*Math.sin(r(a))).toFixed(2)}`, L = (a1-a0) > 180 ? 1 : 0;
+  return `M${P(ro,a0)} A${ro} ${ro} 0 ${L} 1 ${P(ro,a1)} L${P(ri,a1)} A${ri} ${ri} 0 ${L} 0 ${P(ri,a0)} Z`;
+}
+function drawWheel(){
+  const {D, slots} = W, R = D/2, N = slots.length, ro = R-7, ri = R*0.38, rm = (ri+ro)/2 + 2, step = 360/N;
+  const segs = slots.map((s,i) => { const c = -90 + i*step, g = N > 1 ? 1.1 : 0;
+    return `<path class="seg" data-i="${i}" d="${sector(R,R,ri,ro,c-step/2+g,c+step/2-g)}"/>` +
+      `<path class="arc" data-i="${i}" d="${arcPath(R,R,R-2.5,c-step/2+3,c+step/2-3)}"/>`; }).join('');
+  const hubFam = new Set(W.fs.map(f=>f.fam));
+  const one = W.fs.length === 1 ? W.fs[0] : null;
+  const hub = `<div class="hub">${tile(hubFam.size===1 ? [...hubFam][0] : 'doc', 26)}
+    <div class="hn">${one ? esc(one.name) : W.fs.length + ' files'}</div>
+    <div class="hm">${one ? esc(one.meta) : hubFam.size > 1 ? hubFam.size + ' types' : FAM[[...hubFam][0]].label}</div></div>`;
+  const labels = slots.map((s,i) => { const a = (-90 + i*step)*Math.PI/180;
+    return `<div class="slot" role="menuitem" data-i="${i}" style="left:${(R+rm*Math.cos(a)).toFixed(1)}px;top:${(R+rm*Math.sin(a)).toFixed(1)}px;transition-delay:${i*14}ms">
+      ${s.tag ? `<span class="tag">${s.tag}</span>` : ''}${ico(s.icon)}<span class="lbl">${esc(s.k)}</span>${i < 9 && !s.tag ? `<span class="key">${i+1}</span>` : ''}</div>`; }).join('');
+  wheelEl.innerHTML = `<svg viewBox="0 0 ${D} ${D}" aria-hidden="true">${segs}</svg>${labels}${hub}`;
+  setActive(-1);
+}
+function arcPath(cx, cy, r, a0, a1){
+  const rad = a => a*Math.PI/180, P = a => `${(cx+r*Math.cos(rad(a))).toFixed(2)} ${(cy+r*Math.sin(rad(a))).toFixed(2)}`;
+  return `M${P(a0)} A${r} ${r} 0 ${(a1-a0)>180?1:0} 1 ${P(a1)}`;
+}
+function setActive(i){
+  W.active = i; W.opt = null;
+  wheelEl.querySelectorAll('[data-i]').forEach(el => el.classList.toggle('on', +el.dataset.i === i));
+  const s = W.slots[i];
+  if (!s){ hintEl.innerHTML = `<span class="hs">Point at a format</span><span class="hk">1–${Math.min(9,W.slots.length)} to pick · arrows to move · Esc to cancel</span>`; return; }
+  const n = W.fs.filter(f => !s.fam || f.fam === s.fam).length;
+  hintEl.innerHTML = `<span class="ht">${s.tag ? s.tag + ' → ' : ''}${esc(s.k)}</span><span class="hs">${esc(s.hint)}${n>1 && !s.isMore && !s.isBack ? ` · ${n} files` : ''}</span>
+    <span class="hk">${s.isMore || s.isBack ? 'Click to open' : 'Click to convert' + (s.opts ? (OS === 'mac' ? ' · ⇧-click for ' : ' · Shift+click for ') + s.opts.name.toLowerCase() : '')}</span>`;
+}
+function showOpts(i){
+  const s = W.slots[i]; setActive(i); W.opt = s.opts.d;
+  const chips = () => s.opts.vals.map((v,j) => `<button type="button" class="chip" data-j="${j}" aria-pressed="${j===W.opt}">${esc(v)}</button>`).join('');
+  hintEl.innerHTML = `<span class="ht">${esc(s.k)} · ${esc(s.opts.name)}</span><div class="chips">${chips()}</div><button type="button" class="go">Convert</button><span class="hk">Enter to convert · Esc to go back</span>`;
+  hintEl.querySelectorAll('.chip').forEach(b => b.onclick = () => { W.opt = +b.dataset.j; hintEl.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.j === W.opt)); });
+  hintEl.querySelector('.go').onclick = () => convert(s, W.opt);
+}
+function indexAt(p){
+  const dx = p.x - W.cx, dy = p.y - W.cy, d = Math.hypot(dx,dy), R = W.D/2;
+  if (d < R*0.38 || d > R + 48) return -1;
+  const a = (Math.atan2(dy,dx)*180/Math.PI + 90 + 360) % 360, step = 360/W.slots.length;
+  return Math.round(a/step) % W.slots.length;
+}
+overlay.addEventListener('pointermove', e => { if (!W || W.opt !== null) return; const i = indexAt(ptIn(e)); if (i !== W.active) setActive(i); });
+overlay.addEventListener('click', e => {
+  if (!W || e.target.closest('.hint')) return;
+  const i = indexAt(ptIn(e));
+  if (i < 0){ closeWheel(); return; }
+  choose(i, e.shiftKey);
+});
+overlay.addEventListener('contextmenu', e => { e.preventDefault(); if (!W) return; const i = indexAt(ptIn(e)); if (i >= 0) choose(i, true); else closeWheel(); });
+function choose(i, withOpts){
+  const s = W.slots[i];
+  if (s.isMore){ W.page = 'more'; W.slots = W.sets.more; drawWheel(); return; }
+  if (s.isBack){ W.page = 'main'; W.slots = W.sets.main; drawWheel(); return; }
+  if (withOpts && s.opts){ showOpts(i); return; }
+  convert(s, s.opts ? s.opts.d : null);
+}
+function closeWheel(then){
+  if (!W) return;
+  wheelEl.classList.remove('open'); wheelEl.classList.add('closing'); hintEl.classList.remove('show');
+  const w = W; W = null;
+  setTimeout(() => { overlay.hidden = true; wheelEl.classList.remove('closing'); then && then(w); }, 130);
+}
+document.addEventListener('keydown', e => {
+  if (W){
+    const N = W.slots.length;
+    if (e.key === 'Escape'){ e.preventDefault(); if (W.opt !== null) setActive(W.active); else if (W.page === 'more'){ W.page='main'; W.slots=W.sets.main; drawWheel(); } else closeWheel(); return; }
+    if (W.opt !== null){ if (e.key === 'Enter'){ e.preventDefault(); convert(W.slots[W.active], W.opt); } return; }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown'){ e.preventDefault(); setActive((W.active + 1 + N) % N); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp'){ e.preventDefault(); setActive((W.active - 1 + N) % N); return; }
+    if (e.key === 'Enter' && W.active >= 0){ e.preventDefault(); choose(W.active, e.shiftKey); return; }
+    if (e.key === 'Backspace' && W.page === 'more'){ e.preventDefault(); W.page='main'; W.slots=W.sets.main; drawWheel(); return; }
+    const n = parseInt(e.key, 10);
+    if (n >= 1 && n <= N){ e.preventDefault(); setActive(n-1); choose(n-1, e.shiftKey); }
+    return;
+  }
+  if (e.ctrlKey && e.altKey && (e.code === 'KeyC' || e.key.toLowerCase() === 'c')){ e.preventDefault(); hotkey(); }
+});
+function hotkey(){
+  const W0 = stage.clientWidth, H0 = stage.clientHeight;
+  openWheel(lastPt && lastPt.y > 60 ? lastPt : {x:W0/2, y:H0/2});
+}
+['#hotkeyBtn', '#hotkeyBtnMac'].forEach(id => $(id).addEventListener('click', e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(), s = stage.getBoundingClientRect(); openWheel({x: stage.clientWidth/2, y: Math.max(r.bottom - s.top + 190, stage.clientHeight/2)}); }));
+
+/* ---------- conversion (simulated) ---------- */
+function uniq(name){
+  const taken = n => files.some(f => f.name.toLowerCase() === n.toLowerCase());
+  if (!taken(name)) return name;
+  const m = name.match(/^(.*?)((?:\.tar)?\.[a-z0-9]+)?$/i), base = m[1], ext = m[2] || '';
+  const nm = k => OS === 'mac' ? `${base} ${k}${ext}` : `${base} (${k})${ext}`;
+  let k = OS === 'mac' ? 2 : 1; while (taken(nm(k))) k++;
+  return nm(k);
+}
+function outputs(s, targets, opt){
+  const sc = s.opts && opt != null && s.opts.scale ? s.opts.scale[opt] : 1, out = [];
+  if (s.mode === 'merge'){ out.push({name:uniq('Merged.pdf'), size:targets.reduce((a,f)=>a+f.size,0)*.97, ext:'pdf'}); return out; }
+  targets.forEach(f => {
+    const base = f.name.replace(/\.[^.]+$/,''), srcExt = extOf(f.name), ext = s.ext === 'same' ? srcExt : s.ext;
+    const suffix = s.k === 'Resize' && s.opts ? s.opts.vals[opt].replace(' ','') : s.suffix;
+    if (s.mode === 'folder') out.push({name:uniq(`${base} – ${s.folder}`), dir:true, items:f.count || 1});
+    else if (s.mode === 'dir') out.push({name:uniq(base), dir:true, items:148});
+    else if (s.mode === 'suffix') out.push({name:uniq(`${base} (${suffix}).${ext}`), size:f.size*s.ratio*sc, ext});
+    else out.push({name:uniq(`${base}.${ext}`), size:f.size*s.ratio*sc, ext});
+  });
+  return out;
+}
+function convert(s, opt){
+  const targets = W.fs.filter(f => f.fam === s.fam);
+  const center = {x:W.cx, y:W.cy};
+  closeWheel(() => runPill(s, targets, opt, center));
+}
+function runPill(s, targets, opt, c){
+  const pill = $('#pill'), total = targets.reduce((a,f)=>a+f.size,0);
+  const dur = Math.min(3400, 900 + total/9e4), pages = s.mode === 'folder' ? targets.reduce((a,f)=>a+(f.count||1),0) : 0;
+  const Wd = stage.clientWidth;
+  pill.style.left = Math.min(Math.max(c.x,150), Wd-150) + 'px'; pill.style.top = c.y + 'px';
+  const label = targets.length === 1 ? `${targets[0].name} → ${s.k}` : `${targets.length} files → ${s.k}`;
+  pill.innerHTML = `${tile(targets[0].fam,16)}<span class="pt">${esc(label)}</span><span class="pp" id="pp">0%</span><div class="bar"><i id="pb"></i></div>`;
+  pill.hidden = false;
+  const pb = $('#pb'), pp = $('#pp'), t0 = performance.now();
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const tick = t => {
+    const k = Math.min(1, (t - t0)/(reduce ? 400 : dur)), e = 1 - Math.pow(1-k, 1.6);
+    pb.style.width = (e*100).toFixed(1) + '%';
+    pp.textContent = pages > 1 ? `${s.mode==='folder' && s.folder==='frames' ? 'Frame' : 'Page'} ${Math.max(1,Math.ceil(e*pages))} of ${pages}` :
+      targets.length > 1 ? `File ${Math.max(1,Math.ceil(e*targets.length))} of ${targets.length}` : Math.round(e*100) + '%';
+    if (k < 1) requestAnimationFrame(tick); else setTimeout(() => finish(s, targets, opt), 250);
+  };
+  requestAnimationFrame(tick);
+}
+function finish(s, targets, opt){
+  $('#pill').hidden = true;
+  const outs = outputs(s, targets, opt), ids = [];
+  outs.forEach((o,i) => {
+    const id = 'n' + Date.now() + i, e = EXT[o.ext] || EXT[(o.ext||'').split('.').pop()] || ['archive','GZ Archive'];
+    files.push({id, name:o.name, ext:extOf(o.name), dir:!!o.dir, size:o.size||0, date:now(), fam:o.dir?'dir':e[0], type:o.dir?'File folder':e[1], meta:o.dir?`${o.items} items`:human(o.size), count:0});
+    ids.push(id);
+  });
+  sel = new Set(ids); render(ids);
+  const title = (s.done || `Converted to ${s.k}`) + (s.opts && opt != null ? ` · ${s.opts.vals[opt]}` : '');
+  const body = outs.length === 1 ? (outs[0].dir ? `${outs[0].name} · ${outs[0].items} ${s.folder==='frames'?'frames':'files'}` : `${outs[0].name} · ${human(outs[0].size)}`)
+    : `${outs.length} new items · saved next to the originals`;
+  toast(title, body + ' · Downloads', ids);
+}
+function toast(title, body, ids){
+  const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role','status');
+  t.innerHTML = `<div class="tapp">${LOGO}<span>Convertino · now</span><span class="tx" title="Dismiss">✕</span></div><div class="ttl">${esc(title)}</div><div class="tbody">${esc(body)}</div>` +
+    (ids ? `<div class="tbtns"><button type="button" data-a="open">Open folder</button><button type="button" data-a="undo">Undo</button></div>` : '');
+  const kill = () => { t.classList.add('out'); setTimeout(() => t.remove(), 220); };
+  t.querySelector('.tx').onclick = kill;
+  if (ids){
+    t.querySelector('[data-a="open"]').onclick = () => { sel = new Set(ids.filter(id => files.some(f=>f.id===id))); render(ids); kill(); };
+    t.querySelector('[data-a="undo"]').onclick = () => { files = files.filter(f => !ids.includes(f.id)); ids.forEach(id => sel.delete(id)); render(); t.querySelector('.ttl').textContent = OS === 'mac' ? 'Moved to the Trash' : 'Moved to the Recycle Bin'; t.querySelector('.tbtns').remove(); setTimeout(kill, 1600); };
+  }
+  $('#toasts').appendChild(t);
+  setTimeout(() => t.isConnected && kill(), ids ? 8000 : 2600);
+}
+function note(title, body){ toast(title, body, null); }
+
+/* ---------- theme ---------- */
+const root = document.documentElement;
+function setTheme(t){
+  if (t === 'system') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', t);
+  document.querySelectorAll('[data-t]').forEach(b => b.setAttribute('aria-pressed', b.dataset.t === t));
+  try { localStorage.setItem('cv-theme', t); } catch(_){}
+}
+document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => setTheme(b.dataset.t));
+let saved = 'system'; try { saved = localStorage.getItem('cv-theme') || 'system'; } catch(_){}
+setTheme(saved);
+
+/* start in a realistic state: the PDF selected */
+const TRY = {
+  win:'<span><b>Hotkey:</b> select file(s), then <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>C</kbd></span><span><b>Mouse:</b> hold <kbd>Alt</kbd> and right-click a file</span><span><b>In the wheel:</b> <kbd>1</kbd>–<kbd>8</kbd> or arrows, <kbd>Shift</kbd>+click for options, <kbd>Esc</kbd> to cancel</span>',
+  mac:'<span><b>Hotkey:</b> select file(s), then <kbd>⌃</kbd> <kbd>⌥</kbd> <kbd>C</kbd> (Control Option C)</span><span><b>Mouse:</b> hold <kbd>⌥ Option</kbd> and right-click a file</span><span><b>In the wheel:</b> <kbd>1</kbd>–<kbd>8</kbd> or arrows, <kbd>⇧</kbd>-click for options, <kbd>esc</kbd> to cancel</span>'};
+function setOS(os){
+  if (W) { overlay.hidden = true; W = null; }
+  hideCtx(); OS = os; stage.dataset.os = os;
+  $('#win').hidden = os !== 'win'; $('#mac').hidden = os !== 'mac';
+  document.querySelectorAll('[data-os]').forEach(b => { if (b.tagName === 'BUTTON') b.setAttribute('aria-pressed', b.dataset.os === os); });
+  $('#try').innerHTML = TRY[os];
+  render();
+  try { localStorage.setItem('cv-os', os); } catch(_){}
+}
+document.querySelectorAll('button[data-os]').forEach(b => b.onclick = () => setOS(b.dataset.os));
+let osSaved = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'mac' : 'win';
+try { osSaved = localStorage.getItem('cv-os') || osSaved; } catch(_){}
+sel = new Set(['f1']); anchor = 'f1'; setOS(osSaved);
+})();
+</script>
+</body></html>

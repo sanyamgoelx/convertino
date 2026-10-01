@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Convertino</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Convertino</h1>
+    <span class="badge">Milestone 7 · video, data, archives</span>
+  </header>
+
+  <p class="lead">
+    Select files in <span data-fm>File Explorer</span> or on the desktop, then press
+    <span id="keys"></span>, or hold <kbd data-alt>Alt</kbd> and right-click a file. The wheel opens at your pointer; pick a format.
+    Images, audio, video, PDFs, documents, data files and archives convert for real; progress shows in the corner of the screen. This window logs each press and pick.
+  </p>
+
+  <p id="hotkey-note" class="note" hidden></p>
+
+  <section id="empty" class="empty">
+    <strong>Waiting for the hotkey</strong>
+    <span>You can close this window; Convertino keeps running in the <span data-tray>system tray</span>.</span>
+  </section>
+
+  <ol id="events" class="events" hidden></ol>
+
+  <footer>Logs are written to Convertino's log folder on every hotkey press.</footer>
+
+  <script src="main.js"></script>
+</body>
+</html>

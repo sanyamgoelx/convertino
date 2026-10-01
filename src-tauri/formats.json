@@ -1,0 +1,591 @@
+{
+  "families": [
+    {
+      "id": "pdf",
+      "label": "PDF",
+      "color": "#C4262E",
+      "extensions": [
+        "pdf"
+      ],
+      "targets": [
+        {
+          "id": "pdf.jpg",
+          "label": "JPG",
+          "icon": "image",
+          "ext": "jpg",
+          "hint": "One image per page · 150 DPI"
+        },
+        {
+          "id": "pdf.png",
+          "label": "PNG",
+          "icon": "image",
+          "ext": "png",
+          "hint": "Lossless image per page · 150 DPI"
+        },
+        {
+          "id": "pdf.webp",
+          "label": "WEBP",
+          "icon": "image",
+          "ext": "webp",
+          "hint": "Smaller images, one per page"
+        },
+        {
+          "id": "pdf.txt",
+          "label": "TXT",
+          "icon": "doc",
+          "ext": "txt",
+          "hint": "All text from every page"
+        },
+        {
+          "id": "pdf.split",
+          "label": "Split",
+          "icon": "split",
+          "action": true,
+          "hint": "One PDF per page"
+        },
+        {
+          "id": "pdf.compress",
+          "label": "Compress",
+          "icon": "compress",
+          "action": true,
+          "hint": "Smaller PDF for email · images at 150 DPI"
+        },
+        {
+          "id": "pdf.edit",
+          "label": "Edit",
+          "icon": "edit",
+          "action": true,
+          "hint": "Rearrange pages, mark up, sign"
+        },
+        {
+          "id": "pdf.merge",
+          "label": "Merge",
+          "icon": "merge",
+          "action": true,
+          "multi": true,
+          "hint": "Combine the selected PDFs in name order"
+        }
+      ],
+      "more": [
+        {
+          "id": "pdf.tiff",
+          "label": "TIFF",
+          "icon": "image",
+          "ext": "tiff",
+          "hint": "One multi-page TIFF · 300 DPI"
+        },
+        {
+          "id": "pdf.grayscale",
+          "label": "Grayscale",
+          "icon": "pdf",
+          "action": true,
+          "hint": "Black-and-white PDF for printing"
+        }
+      ]
+    },
+    {
+      "id": "audio",
+      "label": "Audio",
+      "color": "#7A4FB0",
+      "extensions": [
+        "wav",
+        "mp3",
+        "flac",
+        "aac",
+        "m4a",
+        "ogg",
+        "opus",
+        "wma",
+        "aiff",
+        "aif",
+        "amr",
+        "oga",
+        "m4b",
+        "weba",
+        "mka",
+        "caf"
+      ],
+      "targets": [
+        {
+          "id": "audio.mp3",
+          "label": "MP3",
+          "icon": "audio",
+          "ext": "mp3",
+          "hint": "320 kbps · plays everywhere"
+        },
+        {
+          "id": "audio.wav",
+          "label": "WAV",
+          "icon": "audio",
+          "ext": "wav",
+          "hint": "Uncompressed · for editing"
+        },
+        {
+          "id": "audio.flac",
+          "label": "FLAC",
+          "icon": "audio",
+          "ext": "flac",
+          "hint": "Lossless · about half the size of WAV"
+        },
+        {
+          "id": "audio.aac",
+          "label": "AAC",
+          "icon": "audio",
+          "ext": "aac",
+          "hint": "256 kbps · good quality, small"
+        },
+        {
+          "id": "audio.ogg",
+          "label": "OGG",
+          "icon": "audio",
+          "ext": "ogg",
+          "hint": "Vorbis · quality 6"
+        },
+        {
+          "id": "audio.opus",
+          "label": "OPUS",
+          "icon": "audio",
+          "ext": "opus",
+          "hint": "96 kbps · best for voice"
+        },
+        {
+          "id": "audio.m4a",
+          "label": "M4A",
+          "icon": "audio",
+          "ext": "m4a",
+          "hint": "AAC in MP4 · plays on iPhone"
+        },
+        {
+          "id": "audio.trim",
+          "label": "Trim",
+          "icon": "trim",
+          "action": true,
+          "hint": "Cut silence from the start and end"
+        }
+      ],
+      "more": [
+        {
+          "id": "audio.aiff",
+          "label": "AIFF",
+          "icon": "audio",
+          "ext": "aiff",
+          "hint": "Uncompressed · for Logic and Pro Tools"
+        },
+        {
+          "id": "audio.normalize",
+          "label": "Normalize",
+          "icon": "level",
+          "action": true,
+          "hint": "Loudness to -14 LUFS · same format"
+        }
+      ]
+    },
+    {
+      "id": "image",
+      "label": "Image",
+      "color": "#2F7D32",
+      "extensions": [
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "avif",
+        "heic",
+        "heif",
+        "bmp",
+        "tif",
+        "tiff",
+        "gif",
+        "svg",
+        "ico",
+        "jfif",
+        "jpe"
+      ],
+      "targets": [
+        {
+          "id": "image.jpg",
+          "label": "JPG",
+          "icon": "image",
+          "ext": "jpg",
+          "hint": "Quality 90 · keeps EXIF"
+        },
+        {
+          "id": "image.png",
+          "label": "PNG",
+          "icon": "image",
+          "ext": "png",
+          "hint": "Lossless · keeps transparency"
+        },
+        {
+          "id": "image.webp",
+          "label": "WEBP",
+          "icon": "image",
+          "ext": "webp",
+          "hint": "Quality 85 · about 30% smaller than JPG"
+        },
+        {
+          "id": "image.avif",
+          "label": "AVIF",
+          "icon": "image",
+          "ext": "avif",
+          "hint": "Smallest file · modern browsers"
+        },
+        {
+          "id": "image.pdf",
+          "label": "PDF",
+          "icon": "pdf",
+          "ext": "pdf",
+          "hint": "One page per image · several images make one PDF"
+        },
+        {
+          "id": "image.ico",
+          "label": "ICO",
+          "icon": "image",
+          "ext": "ico",
+          "hint": "16 to 256 px sizes in one icon"
+        },
+        {
+          "id": "image.resize",
+          "label": "Resize",
+          "icon": "resize",
+          "action": true,
+          "hint": "Longest side 1920 px · same format"
+        }
+      ],
+      "more": [
+        {
+          "id": "image.tiff",
+          "label": "TIFF",
+          "icon": "image",
+          "ext": "tiff",
+          "hint": "Uncompressed · for print"
+        },
+        {
+          "id": "image.bmp",
+          "label": "BMP",
+          "icon": "image",
+          "ext": "bmp",
+          "hint": "Uncompressed bitmap"
+        },
+        {
+          "id": "image.gif",
+          "label": "GIF",
+          "icon": "gif",
+          "ext": "gif",
+          "hint": "256 colours"
+        }
+      ]
+    },
+    {
+      "id": "video",
+      "label": "Video",
+      "color": "#C4531A",
+      "extensions": [
+        "mp4",
+        "mov",
+        "mkv",
+        "webm",
+        "avi",
+        "wmv",
+        "m4v",
+        "3gp",
+        "flv",
+        "mts",
+        "m2ts",
+        "mpg",
+        "mpeg",
+        "ogv"
+      ],
+      "targets": [
+        {
+          "id": "video.mp4",
+          "label": "MP4",
+          "icon": "video",
+          "ext": "mp4",
+          "hint": "H.264 · plays everywhere"
+        },
+        {
+          "id": "video.webm",
+          "label": "WEBM",
+          "icon": "video",
+          "ext": "webm",
+          "hint": "VP9 · for websites"
+        },
+        {
+          "id": "video.gif",
+          "label": "GIF",
+          "icon": "gif",
+          "ext": "gif",
+          "hint": "480 px wide · 15 fps"
+        },
+        {
+          "id": "video.mp3",
+          "label": "MP3",
+          "icon": "audio",
+          "ext": "mp3",
+          "hint": "Extract the audio · 320 kbps"
+        },
+        {
+          "id": "video.compress",
+          "label": "Compress",
+          "icon": "compress",
+          "action": true,
+          "hint": "H.265 · about a third of the size"
+        },
+        {
+          "id": "video.720p",
+          "label": "720p",
+          "icon": "resize",
+          "action": true,
+          "hint": "Downscale to 1280 × 720 MP4"
+        },
+        {
+          "id": "video.frames",
+          "label": "Frames",
+          "icon": "frames",
+          "action": true,
+          "hint": "One PNG per second"
+        }
+      ],
+      "more": [
+        {
+          "id": "video.mov",
+          "label": "MOV",
+          "icon": "video",
+          "ext": "mov",
+          "hint": "QuickTime · for Final Cut and iMovie"
+        },
+        {
+          "id": "video.mkv",
+          "label": "MKV",
+          "icon": "video",
+          "ext": "mkv",
+          "hint": "Same streams, new container · instant"
+        },
+        {
+          "id": "video.wav",
+          "label": "WAV",
+          "icon": "audio",
+          "ext": "wav",
+          "hint": "Extract the audio uncompressed"
+        }
+      ]
+    },
+    {
+      "id": "doc",
+      "label": "Document",
+      "color": "#185ABD",
+      "extensions": [
+        "docx",
+        "doc",
+        "pptx",
+        "ppt",
+        "xlsx",
+        "xls",
+        "odt",
+        "rtf",
+        "md",
+        "html",
+        "htm",
+        "txt",
+        "ods",
+        "odp"
+      ],
+      "targets": [
+        {
+          "id": "doc.pdf",
+          "label": "PDF",
+          "icon": "pdf",
+          "ext": "pdf",
+          "hint": "Keeps the layout · no Office needed"
+        },
+        {
+          "id": "doc.txt",
+          "label": "TXT",
+          "icon": "doc",
+          "ext": "txt",
+          "hint": "Plain text only",
+          "sources": [
+            "docx",
+            "doc",
+            "odt",
+            "rtf",
+            "txt",
+            "md",
+            "html"
+          ]
+        },
+        {
+          "id": "doc.html",
+          "label": "HTML",
+          "icon": "code",
+          "ext": "html",
+          "hint": "Web page with images inline",
+          "sources": [
+            "docx",
+            "doc",
+            "odt",
+            "rtf",
+            "txt",
+            "md"
+          ]
+        },
+        {
+          "id": "doc.md",
+          "label": "Markdown",
+          "icon": "doc",
+          "ext": "md",
+          "hint": "Headings, lists and tables kept",
+          "sources": [
+            "docx",
+            "doc",
+            "odt",
+            "rtf",
+            "html"
+          ]
+        },
+        {
+          "id": "doc.docx",
+          "label": "DOCX",
+          "icon": "doc",
+          "ext": "docx",
+          "hint": "Word document",
+          "sources": [
+            "docx",
+            "doc",
+            "odt",
+            "rtf",
+            "txt",
+            "md",
+            "html"
+          ]
+        },
+        {
+          "id": "doc.odt",
+          "label": "ODT",
+          "icon": "doc",
+          "ext": "odt",
+          "hint": "OpenDocument for LibreOffice",
+          "sources": [
+            "docx",
+            "doc",
+            "odt",
+            "rtf",
+            "txt",
+            "md",
+            "html"
+          ]
+        },
+        {
+          "id": "doc.csv",
+          "label": "CSV",
+          "icon": "table",
+          "ext": "csv",
+          "hint": "First sheet · comma separated",
+          "sources": [
+            "xlsx",
+            "xls",
+            "ods"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data",
+      "label": "Data",
+      "color": "#107C41",
+      "extensions": [
+        "csv",
+        "tsv",
+        "json",
+        "yaml",
+        "yml",
+        "xml"
+      ],
+      "targets": [
+        {
+          "id": "data.xlsx",
+          "label": "XLSX",
+          "icon": "table",
+          "ext": "xlsx",
+          "hint": "One sheet · header row frozen"
+        },
+        {
+          "id": "data.csv",
+          "label": "CSV",
+          "icon": "table",
+          "ext": "csv",
+          "hint": "Comma separated"
+        },
+        {
+          "id": "data.json",
+          "label": "JSON",
+          "icon": "code",
+          "ext": "json",
+          "hint": "Array of objects · keys from the header row"
+        },
+        {
+          "id": "data.yaml",
+          "label": "YAML",
+          "icon": "code",
+          "ext": "yaml",
+          "hint": "List of records"
+        },
+        {
+          "id": "data.tsv",
+          "label": "TSV",
+          "icon": "table",
+          "ext": "tsv",
+          "hint": "Tab separated"
+        }
+      ]
+    },
+    {
+      "id": "archive",
+      "label": "Archive",
+      "color": "#9A6B00",
+      "extensions": [
+        "zip",
+        "7z",
+        "rar",
+        "tar",
+        "gz",
+        "tgz",
+        "bz2",
+        "xz",
+        "tbz2",
+        "txz"
+      ],
+      "targets": [
+        {
+          "id": "archive.extract",
+          "label": "Extract",
+          "icon": "extract",
+          "action": true,
+          "hint": "Unpack into a folder next to the archive"
+        },
+        {
+          "id": "archive.zip",
+          "label": "ZIP",
+          "icon": "archive",
+          "ext": "zip",
+          "hint": "Standard ZIP · opens everywhere"
+        },
+        {
+          "id": "archive.7z",
+          "label": "7Z",
+          "icon": "archive",
+          "ext": "7z",
+          "hint": "7-Zip · about 20% smaller"
+        },
+        {
+          "id": "archive.targz",
+          "label": "TAR.GZ",
+          "icon": "archive",
+          "ext": "tgz",
+          "hint": "For Linux and servers"
+        }
+      ]
+    }
+  ]
+}
