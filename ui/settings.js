@@ -165,7 +165,40 @@ function renderShortcut() {
 
 // ---------- rendering ----------
 
+// ---------- Mac permissions ----------
+
+let perms = null;
+let permTimer = null;
+
+async function refreshPerms() {
+  if (!isMac()) return;
+  try { perms = await invoke("permissions_get"); } catch (e) { return; }
+  renderPerms();
+  // While something is missing, keep checking: System Settings changes it from outside.
+  clearTimeout(permTimer);
+  if (!perms.accessibility || perms.finder !== "granted") permTimer = setTimeout(refreshPerms, 2000);
+}
+
+function renderPerms() {
+  const box = $("perms");
+  if (!perms || !perms.mac) { box.hidden = true; return; }
+  box.hidden = false;
+  const state = (el, ok, text) => {
+    el.className = "perm-state " + (ok ? "ok" : "todo");
+    el.innerHTML = ok ? `<svg class="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="${OK}"/></svg>Allowed` : esc(text);
+  };
+  state($("perm-ax"), perms.accessibility, "Not allowed yet");
+  $("perm-ax-btn").hidden = perms.accessibility;
+  const f = perms.finder;
+  state($("perm-finder"), f === "granted", f === "denied" ? "Turned off" : f === "unknown" ? "Open Finder, then Allow" : "Not allowed yet");
+  $("perm-finder-btn").hidden = f === "granted";
+  $("perm-finder-btn").textContent = f === "denied" ? "Open System Settings" : "Allow";
+  $("perm-note").hidden = perms.accessibility && f === "granted";
+}
+
 function setPage(p) {
+  // "permissions" lives at the top of General (Mac).
+  if (p === "permissions") p = "general";
   if (!NAV.some((n) => n.id === p)) p = "general";
   if (recording) stopRecording();
   page = p;
@@ -416,14 +449,15 @@ function renderConverters() {
       status = `<span class="bar"><i style="width:${pct}%"></i></span><span class="pct">${pct ? pct + "%" : "…"}</span>`;
     } else if (t.state === "ready" && updates.has(t.id)) {
       status = `<button type="button" class="btn" data-get="${t.id}" data-replace="1">Update</button>`;
-    } else if (t.state === "ready" || t.state === "system") {
+    } else if (t.state === "ready" || t.state === "system" || t.state === "bundled") {
       status = `<span class="ready"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${OK}"/></svg>Ready</span>`;
     } else {
       status = `<button type="button" class="btn" data-get="${t.id}">Download now</button>`;
     }
     const size = t.state === "ready"
       ? `${t.version ? esc(t.version) + " · " : ""}${t.sizeMb} MB`
-      : t.state === "system" ? "Installed on this PC" : `about ${t.downloadMb} MB to download`;
+      : t.state === "system" ? (isMac() ? "Installed on this Mac" : "Installed on this PC")
+      : t.state === "bundled" ? "Comes with Convertino" : `about ${t.downloadMb} MB to download`;
     const detail = p && p.detail ? `<span class="detail">${esc(p.detail)}</span>` : "";
     return `<div class="tool"><span class="name">${esc(t.name)}</span><span class="what">${esc(t.what)}${detail}</span>` +
       `<span class="size">${size}</span><span class="status">${status}</span></div>`;
@@ -522,6 +556,8 @@ document.querySelectorAll(".switch[data-key]").forEach((el) => el.addEventListen
   save({ [k]: !view.settings[k] });
 }));
 $("rec-start").addEventListener("click", startRecording);
+$("perm-ax-btn").addEventListener("click", () => invoke("permissions_request", { kind: "accessibility" }).then(refreshPerms));
+$("perm-finder-btn").addEventListener("click", () => invoke("permissions_request", { kind: "finder" }).then(() => setTimeout(refreshPerms, 500)));
 $("rec-cancel").addEventListener("pointerdown", (e) => { e.preventDefault(); stopRecording(); });
 $("recorder").addEventListener("keydown", onRecordKey);
 $("recorder").addEventListener("blur", () => setTimeout(() => recording && stopRecording(), 0));
@@ -570,6 +606,7 @@ function toast(text) {
 async function load() {
   view = await invoke("settings_get");
   render();
+  refreshPerms();
 }
 
 if (tauri) {
@@ -590,11 +627,14 @@ if (tauri) {
   });
 }
 page = (location.hash || "#general").slice(1);
+if (!NAV.some((n) => n.id === page)) page = "general";
 load().then(() => setPage(page));
 
 // ---------- in a plain browser: sample data, for checking the design ----------
 
 function demoInvoke(cmd, args) {
+  if (cmd === "permissions_get") return Promise.resolve({ mac: true, accessibility: true, altClickOn: true, finder: "not-asked" });
+  if (cmd === "permissions_request") return Promise.resolve(null);
   const d = (window.__demo = window.__demo || {
     settings: {
       shortcut: "ctrl+alt+shift+KeyC", altClick: true, startAtLogin: true, progressRing: true, saveMode: "next", saveFolder: null,
@@ -612,7 +652,7 @@ function demoInvoke(cmd, args) {
       ["libreoffice", "LibreOffice", "Word, Excel, PowerPoint", "system", null, 0, 350],
     ].map(([id, name, what, state, version, sizeMb, downloadMb]) => ({ id, name, what, state, version, sizeMb, downloadMb, build: id === "ffmpeg" ? "lgpl" : null })),
   });
-  const viewOf = () => ({ settings: JSON.parse(JSON.stringify(d.settings)), shortcut: d.shortcut, families: JSON.parse(JSON.stringify(d.families)), os: "win", version: "0.1.0", accent: null, dev: false });
+  const viewOf = () => ({ settings: JSON.parse(JSON.stringify(d.settings)), shortcut: d.shortcut, families: JSON.parse(JSON.stringify(d.families)), os: new URLSearchParams(location.search).get("os") || "win", version: "0.1.0", accent: null, dev: false });
   const merge = (a, b) => { for (const k in b) { if (b[k] && typeof b[k] === "object" && !Array.isArray(b[k]) && a[k] && typeof a[k] === "object") merge(a[k], b[k]); else a[k] = b[k]; } };
   switch (cmd) {
     case "settings_get": return Promise.resolve(viewOf());

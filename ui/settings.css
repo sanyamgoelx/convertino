@@ -239,3 +239,99 @@ dialog td:nth-child(2) { color: var(--ink-2); }
   .preview-side { align-self: center; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; animation: none !important; } }
+
+/* Permissions (Mac) */
+.perm-head { margin: 4px 0 2px; font-size: 12px; color: var(--ink-2); }
+.perm-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.perm-state.ok { color: var(--good); }
+.perm-state.todo { color: var(--warn); }
+.perm-note { margin: 6px 4px 10px; }
+#perms { display: flex; flex-direction: column; gap: 6px; }
+#perms[hidden] { display: none !important; }
+
+/* ---------- Mac look: toolbar tabs, grouped rounded cards, Apple controls ---------- */
+:root[data-os="mac"] {
+  --win: #f5f5f7;
+  --card: #ffffff;
+  --card-line: rgba(0, 0, 0, 0.08);
+  --toolbar: #ececec;
+  --ink: #1d1d1f;
+  --ink-2: #6e6e73;
+  --ink-3: #86868b;
+  --accent: #007aff;
+  --on-accent: #ffffff;
+  --btn: #ffffff;
+  --btn-hover: #f2f2f2;
+  --field: #ffffff;
+  --key: #e8e8ed;
+  --nav-on: rgba(0, 0, 0, 0.07);
+  --nav-hover: rgba(0, 0, 0, 0.04);
+  --good: #248a3d;
+  --warn: #a05a00;
+  --bad: #d70015;
+  --off-track: rgba(0, 0, 0, 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-os="mac"] {
+    --win: #1e1e1e;
+    --card: #2a2a2a;
+    --card-line: rgba(255, 255, 255, 0.07);
+    --toolbar: #2a2a2a;
+    --ink: #ffffff;
+    --ink-2: #a1a1a6;
+    --ink-3: #8e8e93;
+    --accent: #0a84ff;
+    --on-accent: #ffffff;
+    --btn: #48484a;
+    --btn-hover: #545456;
+    --field: #3a3a3c;
+    --key: #3a3a3c;
+    --nav-on: rgba(255, 255, 255, 0.1);
+    --nav-hover: rgba(255, 255, 255, 0.05);
+    --good: #32d74b;
+    --warn: #ffd60a;
+    --bad: #ff453a;
+    --off-track: rgba(255, 255, 255, 0.16);
+  }
+}
+:root[data-os="mac"] body { font-size: 13px; }
+:root[data-os="mac"] .app { flex-direction: column; }
+:root[data-os="mac"] .nav {
+  width: auto; flex-direction: row; justify-content: center; gap: 4px; padding: 8px 16px;
+  background: var(--toolbar); border-bottom: 1px solid var(--card-line);
+}
+:root[data-os="mac"] .nav button {
+  width: 80px; height: 52px; flex-direction: column; justify-content: center; gap: 3px; padding: 0;
+  border-radius: 6px; font-size: 11px; color: var(--ink-2); text-align: center;
+}
+:root[data-os="mac"] .nav button .ic { width: 22px; height: 22px; }
+:root[data-os="mac"] .nav button[aria-current="page"] { color: var(--accent); }
+:root[data-os="mac"] .nav button[aria-current="page"]::before { display: none; }
+:root[data-os="mac"] .main { padding: 20px 32px 40px; }
+:root[data-os="mac"] h1 { display: none; }
+:root[data-os="mac"] section { max-width: 760px; margin: 0 auto; gap: 8px; }
+:root[data-os="mac"] .card { border-radius: 10px; padding: 10px 14px; gap: 10px; }
+:root[data-os="mac"] .card.row { min-height: 46px; padding: 6px 14px; }
+:root[data-os="mac"] .card.list { padding: 0; }
+:root[data-os="mac"] .card > .ic, :root[data-os="mac"] .row > .ic { display: none; }
+:root[data-os="mac"] .indent, :root[data-os="mac"] .msg { margin-left: 0; }
+:root[data-os="mac"] .sub { font-size: 11.5px; }
+:root[data-os="mac"] .state { display: none; }
+:root[data-os="mac"] .btn { height: 24px; padding: 0 12px; border-radius: 6px; border: 0; background: var(--btn); box-shadow: 0 0 0 0.5px var(--card-line), 0 1px 1px rgba(0, 0, 0, 0.06); }
+:root[data-os="mac"] .btn.primary { background: var(--accent); color: var(--on-accent); font-weight: 400; box-shadow: none; }
+:root[data-os="mac"] select { height: 24px; border-radius: 6px; border: 0; background: var(--btn); box-shadow: 0 0 0 0.5px var(--card-line), 0 1px 1px rgba(0, 0, 0, 0.06); }
+:root[data-os="mac"] .keys span { height: 24px; min-width: 24px; border-radius: 5px; border: 0; background: var(--key); font-weight: 500; letter-spacing: 0.04em; }
+:root[data-os="mac"] .recorder { height: 24px; border-radius: 6px; }
+:root[data-os="mac"] .switch { width: 38px; height: 22px; border-radius: 11px; border: 0; background: var(--off-track); }
+:root[data-os="mac"] .switch span, :root[data-os="mac"] .switch:hover span {
+  top: 2px; left: 2px; width: 18px; height: 18px; background: #ffffff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+:root[data-os="mac"] .switch[aria-checked="true"] { background: var(--accent); }
+:root[data-os="mac"] .switch[aria-checked="true"] span, :root[data-os="mac"] .switch[aria-checked="true"]:hover span { left: 18px; background: #ffffff; }
+:root[data-os="mac"] .radio .dot { width: 16px; height: 16px; }
+:root[data-os="mac"] .radio[aria-checked="true"] .dot { border-width: 5px; }
+:root[data-os="mac"] .radio[aria-checked="true"] .dot::after { width: 6px; height: 6px; }
+:root[data-os="mac"] .chips button { height: 26px; border-radius: 13px; }
+:root[data-os="mac"] .tip { border-radius: 10px; }
+:root[data-os="mac"] dialog { border-radius: 12px; }
+:root[data-os="mac"] .item, :root[data-os="mac"] .qrow, :root[data-os="mac"] .tool { padding-left: 14px; padding-right: 14px; }

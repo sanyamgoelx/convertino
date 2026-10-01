@@ -45,6 +45,8 @@ if (-not (git config user.name)) { git config user.name $user }
 if (-not (git config user.email)) { git config user.email "$user@users.noreply.github.com" }
 git config core.autocrlf true
 
+# A leftover lock (an interrupted git command) would stop the commit.
+if (Test-Path ".git\index.lock") { Remove-Item ".git\index.lock" -Force -ErrorAction SilentlyContinue }
 git add -A
 $pending = git status --porcelain
 if ($pending) {

@@ -14,6 +14,24 @@
 
     <!-- ===== General ===== -->
     <section data-page="general">
+      <!-- Mac only: what macOS has to allow (shown first while something is missing). -->
+      <div id="perms" hidden>
+        <h2 class="perm-head">Permissions</h2>
+        <div class="card list">
+          <div class="item">
+            <div class="grow"><div>Accessibility</div><div class="sub">Lets Option-right-click open the wheel</div></div>
+            <span class="perm-state" id="perm-ax"></span>
+            <button type="button" class="btn primary" id="perm-ax-btn">Open System Settings</button>
+          </div>
+          <div class="item">
+            <div class="grow"><div>Finder (Automation)</div><div class="sub">Lets Convertino see which files you selected</div></div>
+            <span class="perm-state" id="perm-finder"></span>
+            <button type="button" class="btn primary" id="perm-finder-btn">Allow</button>
+          </div>
+        </div>
+        <div class="sub perm-note" id="perm-note">In System Settings, turn on Convertino in the list. Convertino notices by itself; no restart needed.</div>
+        <h2 class="perm-head">General</h2>
+      </div>
       <div class="card">
         <div class="row">
           <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4z M7 10h1 M10 10h1 M13 10h1 M16 10h1 M8 14h8"/></svg>

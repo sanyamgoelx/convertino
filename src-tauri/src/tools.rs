@@ -45,13 +45,14 @@ impl Tool {
             Tool::Pdftotext => (&["poppler/bin/pdftotext", "poppler/pdftotext"], &["pdftotext"]),
             Tool::Pdfseparate => (&["poppler/bin/pdfseparate", "poppler/pdfseparate"], &["pdfseparate"]),
             Tool::Pdfunite => (&["poppler/bin/pdfunite", "poppler/pdfunite"], &["pdfunite"]),
-            Tool::Ghostscript => (&["ghostscript/bin/gswin64c"], &["gswin64c", "gs"]),
+            Tool::Ghostscript => (&["ghostscript/bin/gswin64c", "ghostscript/bin/gs"], &["gswin64c", "gs"]),
             // soffice.com waits for the conversion to finish; soffice.exe may not.
             Tool::LibreOffice => (
                 &[
                     "libreoffice/program/soffice.com",
                     "libreoffice/LibreOffice/program/soffice.com",
                     "libreoffice/program/soffice",
+                    "libreoffice/LibreOffice.app/Contents/MacOS/soffice",
                 ],
                 &["soffice", "libreoffice"],
             ),
@@ -63,6 +64,14 @@ impl Tool {
 
     /// Standard install locations outside tools/.
     fn installed_locations(self) -> Vec<PathBuf> {
+        // Apps started from the Dock or Finder don't get Homebrew on their PATH.
+        if cfg!(target_os = "macos") && self != Tool::LibreOffice {
+            let (_, names) = self.layout();
+            return ["/opt/homebrew/bin", "/usr/local/bin"]
+                .iter()
+                .flat_map(|d| names.iter().map(move |n| Path::new(d).join(n)))
+                .collect();
+        }
         match self {
             Tool::LibreOffice => {
                 let mut v = Vec::new();
@@ -156,6 +165,9 @@ pub fn require(tool: Tool) -> Result<PathBuf, String> {
 pub fn command(path: &Path) -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new(path);
+    for (k, v) in bundled_env(path) {
+        cmd.env(k, v);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -163,4 +175,83 @@ pub fn command(path: &Path) -> Command {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd
+}
+
+/// Converters that ship inside Convertino for Mac (ImageMagick, Poppler,
+/// Ghostscript; see ci/bundle-mac-tools.sh) were built for another folder:
+/// these variables tell them where their own data files are now.
+fn bundled_env(path: &Path) -> Vec<(&'static str, PathBuf)> {
+    let mut env = Vec::new();
+    // tools/<pack>/<program> or tools/<pack>/bin/<program>
+    let Some(parent) = path.parent() else { return env };
+    let pack = if parent.file_name().is_some_and(|n| n == "bin") { parent.parent() } else { Some(parent) };
+    let Some(pack) = pack else { return env };
+    // Written by the bundling script; its presence means "relocated build".
+    if !pack.join(".bundled").is_file() {
+        return env;
+    }
+    let fonts = pack.join("etc/fonts/fonts.conf");
+    if fonts.is_file() {
+        env.push(("FONTCONFIG_FILE", fonts));
+    }
+    match pack.file_name().and_then(|n| n.to_str()) {
+        Some("imagemagick") => {
+            env.push(("MAGICK_HOME", pack.to_path_buf()));
+            env.push(("MAGICK_CONFIGURE_PATH", pack.join("etc")));
+            env.push(("MAGICK_CODER_MODULE_PATH", pack.join("modules/coders")));
+            env.push(("MAGICK_CODER_FILTER_PATH", pack.join("modules/filters")));
+        }
+        Some("ghostscript") => {
+            // share/ghostscript/<version>/{Resource/Init,lib,Resource/Font} and share/ghostscript/fonts
+            let share = pack.join("share/ghostscript");
+            let mut dirs = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&share) {
+                for e in rd.flatten() {
+                    let v = e.path();
+                    if v.join("Resource/Init").is_dir() {
+                        dirs.push(v.join("Resource/Init"));
+                        dirs.push(v.join("lib"));
+                        dirs.push(v.join("Resource/Font"));
+                        dirs.push(v.join("iccprofiles"));
+                    }
+                }
+            }
+            dirs.push(share.join("fonts"));
+            if let Ok(joined) = std::env::join_paths(dirs) {
+                env.push(("GS_LIB", PathBuf::from(joined)));
+            }
+        }
+        Some("poppler") => {
+            // Poppler finds its encoding data relative to its install prefix only;
+            // nothing to set beyond fonts.
+        }
+        _ => {}
+    }
+    env
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relocated_builds_get_their_data_paths() {
+        let d = std::env::temp_dir().join(format!("convertino-bundled-{}", std::process::id()));
+        let im = d.join("imagemagick");
+        std::fs::create_dir_all(im.join("etc/fonts")).unwrap();
+        std::fs::write(im.join(".bundled"), "").unwrap();
+        std::fs::write(im.join("etc/fonts/fonts.conf"), "<fontconfig/>").unwrap();
+        let env = bundled_env(&im.join("magick"));
+        assert!(env.iter().any(|(k, v)| *k == "MAGICK_CONFIGURE_PATH" && v.ends_with("etc")));
+        assert!(env.iter().any(|(k, _)| *k == "FONTCONFIG_FILE"));
+        let gs = d.join("ghostscript");
+        std::fs::create_dir_all(gs.join("bin")).unwrap();
+        std::fs::create_dir_all(gs.join("share/ghostscript/10.05.1/Resource/Init")).unwrap();
+        std::fs::write(gs.join(".bundled"), "").unwrap();
+        let env = bundled_env(&gs.join("bin/gs"));
+        let lib = env.iter().find(|(k, _)| *k == "GS_LIB").unwrap().1.to_string_lossy().into_owned();
+        assert!(lib.contains("10.05.1") && lib.contains("Init"), "{lib}");
+        // Ordinary folders get nothing.
+        assert!(bundled_env(Path::new("/usr/bin/gs")).is_empty());
+    }
 }

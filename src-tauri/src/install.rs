@@ -150,15 +150,22 @@ pub fn ensure(pack: Pack) -> Result<(), String> {
     if installed(pack) {
         return Ok(());
     }
-    let Some(root) = root().filter(|_| cfg!(windows)) else {
+    if cfg!(target_os = "macos") && pack.bundled_on_mac() {
+        return Err(format!(
+            "{} comes with Convertino for Mac but is missing here. Download Convertino again, or install it with Homebrew (brew install {}).",
+            pack.name(),
+            pack.brew_name()
+        ));
+    }
+    let Some(root) = root().filter(|_| downloads_supported()) else {
         return Err(format!("{} isn't installed on this computer yet.", pack.name()));
     };
     let _guard = LOCKS[pack as usize].lock().unwrap_or_else(|e| e.into_inner());
     if installed(pack) {
         return Ok(()); // another job got it while this one waited
     }
-    if pack != Pack::SevenZip {
-        ensure(Pack::SevenZip)?; // unpacks everything else
+    if pack != Pack::SevenZip && cfg!(windows) {
+        ensure(Pack::SevenZip)?; // unpacks everything else (a Mac has its own unzip)
     }
     log::info!("installing {} into {}", pack.name(), root.display());
     let _busy = Busy::new(pack);
@@ -173,11 +180,37 @@ pub fn ensure(pack: Pack) -> Result<(), String> {
     result
 }
 
+/// Windows and Mac download converters; elsewhere they come from the system.
+fn downloads_supported() -> bool {
+    cfg!(windows) || cfg!(target_os = "macos")
+}
+
+impl Pack {
+    /// Shipped inside Convertino for Mac (no official Mac builds to download).
+    pub fn bundled_on_mac(self) -> bool {
+        matches!(self, Pack::Magick | Pack::Poppler | Pack::Ghostscript)
+    }
+
+    fn brew_name(self) -> &'static str {
+        match self {
+            Pack::Magick => "imagemagick",
+            Pack::Poppler => "poppler",
+            Pack::Ghostscript => "ghostscript",
+            Pack::SevenZip => "sevenzip",
+            Pack::Ffmpeg => "ffmpeg",
+            Pack::Pandoc => "pandoc",
+            Pack::LibreOffice => "--cask libreoffice",
+        }
+    }
+}
+
 fn install(pack: Pack, root: &Path, work: &Path) -> Result<(), String> {
     let source = fetch_and_unpack(pack, work)?;
     let name = pack.name();
     let staging = work.join(pack.dir()).join("ready");
-    trim(pack, &staging);
+    if cfg!(windows) {
+        trim(pack, &staging);
+    }
     mark(&staging, &source);
     let dest = root.join(pack.dir());
     if dest.exists() {
@@ -200,6 +233,9 @@ fn fetch_and_unpack(pack: Pack, work: &Path) -> Result<String, String> {
     fs::create_dir_all(&w).map_err(|e| format!("Couldn't make a folder for {name}: {e}"))?;
     let staging = w.join("ready");
     let unpacked = w.join("unpacked");
+    if cfg!(target_os = "macos") {
+        return mac::fetch(pack, &w, &staging, &unpacked);
+    }
 
     let source = match pack {
         Pack::SevenZip => {
@@ -280,6 +316,9 @@ fn ffmpeg_build() -> String {
 /// existed (fetch-tools.cmd from older versions). Returns megabytes freed.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn trim_existing() -> u64 {
+    if !cfg!(windows) {
+        return 0; // the trimming rules are for the Windows downloads
+    }
     let Some(root) = root() else { return 0 };
     let mut freed = 0;
     for pack in Pack::ALL {
@@ -314,6 +353,9 @@ fn source_of(dir: &Path) -> Option<String> {
 /// Convertino's own FFmpeg is a different build from the one Settings asks
 /// for (an older copy from before x264/x265 became the default).
 pub fn ffmpeg_build_differs() -> bool {
+    if cfg!(target_os = "macos") {
+        return false; // the Mac builds always include x264/x265
+    }
     let Some(dir) = root().map(|r| r.join(Pack::Ffmpeg.dir())).filter(|d| d.is_dir()) else { return false };
     let have = if source_of(&dir).is_some_and(|s| s.contains("-gpl-")) { "gpl" } else { "lgpl" };
     have != ffmpeg_build()
@@ -374,6 +416,15 @@ impl Pack {
 
     /// Roughly what the first download weighs, in MB.
     fn download_mb(self) -> u32 {
+        if cfg!(target_os = "macos") {
+            return match self {
+                Pack::SevenZip => 2,
+                Pack::Ffmpeg => 30,
+                Pack::Pandoc => 40,
+                Pack::LibreOffice => 300,
+                _ => 0, // comes with the app
+            };
+        }
         match self {
             Pack::SevenZip => 2,
             Pack::Ffmpeg if ffmpeg_build() == "gpl" => 86,
@@ -414,6 +465,8 @@ pub fn status() -> Vec<Status> {
             let source = ours.as_deref().and_then(source_of);
             let state = if downloading.contains(&pack) {
                 "downloading"
+            } else if cfg!(target_os = "macos") && pack.bundled_on_mac() {
+                if installed(pack) { "bundled" } else { "missing" }
             } else if ours.is_some() {
                 "ready"
             } else if installed(pack) {
@@ -483,6 +536,9 @@ fn version_label(pack: Pack, source: &str) -> Option<String> {
 fn latest_source(pack: Pack) -> Result<String, String> {
     let name = pack.name();
     let asset = |repo: &str, pick: &dyn Fn(&str) -> bool| github_asset(repo, pick, name).map(|a| a.0);
+    if cfg!(target_os = "macos") {
+        return mac::latest_source(pack);
+    }
     match pack {
         Pack::SevenZip => asset("ip7z/7zip", &|n| n.starts_with("7z") && n.ends_with("-x64.exe")),
         Pack::Ffmpeg => {
@@ -523,12 +579,12 @@ pub fn check_updates() -> Result<Vec<&'static str>, String> {
 
 /// Downloads the pack even if a copy is there (an update, or the other FFmpeg build).
 pub fn reinstall(pack: Pack) -> Result<(), String> {
-    let Some(root) = root().filter(|_| cfg!(windows)) else {
-        return Err(format!("{} can't be downloaded on this computer yet.", pack.name()));
+    let Some(root) = root().filter(|_| downloads_supported() && !(cfg!(target_os = "macos") && pack.bundled_on_mac())) else {
+        return Err(format!("{} can't be downloaded on this computer.", pack.name()));
     };
     let _busy = Busy::new(pack);
     let _guard = LOCKS[pack as usize].lock().unwrap_or_else(|e| e.into_inner());
-    if pack != Pack::SevenZip {
+    if pack != Pack::SevenZip && cfg!(windows) {
         ensure(Pack::SevenZip)?;
     }
     let work = root.join(".work");
@@ -1277,5 +1333,174 @@ mod tests {
         println!("{total:>8} MB  in {}", root.display());
         assert!(failed.is_empty(), "not ready: {failed:?}");
         println!("TOOLS READY");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// macOS: FFmpeg, Pandoc, 7-Zip and LibreOffice download on first use;
+// ImageMagick, Poppler and Ghostscript come inside the app.
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod mac {
+    use super::*;
+
+    fn arm() -> bool {
+        cfg!(target_arch = "aarch64")
+    }
+
+    pub fn ffmpeg_url() -> String {
+        format!("https://ffmpeg.martin-riedl.de/redirect/latest/macos/{}/release/ffmpeg.zip", if arm() { "arm64" } else { "amd64" })
+    }
+
+    fn pandoc_pick(n: &str) -> bool {
+        n.ends_with(if arm() { "-arm64-macOS.zip" } else { "-x86_64-macOS.zip" })
+    }
+
+    fn seven_pick(n: &str) -> bool {
+        n.starts_with("7z") && n.ends_with("-mac.tar.xz")
+    }
+
+    pub fn libreoffice_url(version: &str) -> String {
+        let (dir, file) = if arm() { ("aarch64", "aarch64") } else { ("x86_64", "x86-64") };
+        format!("https://download.documentfoundation.org/libreoffice/stable/{version}/mac/{dir}/LibreOffice_{version}_MacOS_{file}.dmg")
+    }
+
+    fn run(cmd: &mut Command, what: &str, minutes: u64) -> Result<(), String> {
+        let out = procs::output(cmd, what, Some(Duration::from_secs(minutes * 60)))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            log::warn!("{what}: {}", String::from_utf8_lossy(&out.stderr));
+            Err(format!("Couldn't set up {what}. Try again; it'll download afresh."))
+        }
+    }
+
+    /// Unzips or untars with the Mac's own tools.
+    fn unpack(archive: &Path, to: &Path, what: &str) -> Result<(), String> {
+        fs::create_dir_all(to).map_err(|e| e.to_string())?;
+        let name = file_name(archive);
+        if name.ends_with(".zip") {
+            run(Command::new("/usr/bin/ditto").args(["-x", "-k"]).arg(archive).arg(to), what, 10)
+        } else {
+            run(Command::new("/usr/bin/tar").arg("-xf").arg(archive).arg("-C").arg(to), what, 10)
+        }
+    }
+
+    /// Programs downloaded with curl aren't quarantined, but Apple silicon
+    /// only runs code with at least an ad-hoc signature.
+    fn sign(path: &Path) {
+        let _ = Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(path).output();
+        let _ = Command::new("/bin/chmod").arg("+x").arg(path).output();
+    }
+
+    /// Final URL after redirects (the FFmpeg link points at the current version).
+    fn resolved(url: &str) -> Option<String> {
+        let mut cmd = super::curl();
+        cmd.args(["-sIL", "-o", "/dev/null", "-w", "%{url_effective}"]).arg(url);
+        let out = procs::output(&mut cmd, "curl", Some(Duration::from_secs(30))).ok()?;
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (!s.is_empty()).then_some(s)
+    }
+
+    pub fn fetch(pack: Pack, w: &Path, staging: &Path, unpacked: &Path) -> Result<String, String> {
+        let name = pack.name();
+        match pack {
+            Pack::SevenZip => {
+                let arc = github_download(w, "ip7z/7zip", seven_pick, name)?;
+                report(1.0, &format!("Setting up {name}…"));
+                unpack(&arc, staging, name)?;
+                let zz = staging.join("7zz");
+                if !zz.is_file() {
+                    return Err("7zz wasn't in the 7-Zip download.".into());
+                }
+                sign(&zz);
+                Ok(file_name(&arc))
+            }
+            Pack::Ffmpeg => {
+                let zip = w.join("ffmpeg.zip");
+                let url = ffmpeg_url();
+                let source = resolved(&url).unwrap_or_else(|| url.clone());
+                fs::create_dir_all(staging).map_err(|e| e.to_string())?;
+                match download(&url, None, &zip, name).and_then(|_| {
+                    report(1.0, &format!("Setting up {name}…"));
+                    unpack(&zip, unpacked, name)?;
+                    let exe = find_file(unpacked, "ffmpeg", 3).ok_or("ffmpeg wasn't in the download.")?;
+                    fs::rename(&exe, staging.join("ffmpeg")).map_err(|e| e.to_string())
+                }) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        // Second source: a static build on GitHub.
+                        log::warn!("FFmpeg from {url} failed ({e}); trying the GitHub build");
+                        let asset = if arm() { "ffmpeg-darwin-arm64" } else { "ffmpeg-darwin-x64" };
+                        let bin = github_download(w, "eugeneware/ffmpeg-static", |n| n == asset, name)?;
+                        fs::rename(&bin, staging.join("ffmpeg")).map_err(|e| e.to_string())?;
+                    }
+                }
+                sign(&staging.join("ffmpeg"));
+                Ok(source.rsplit('/').next().unwrap_or("ffmpeg").to_string())
+            }
+            Pack::Pandoc => {
+                let zip = github_download(w, "jgm/pandoc", pandoc_pick, name)?;
+                report(1.0, &format!("Setting up {name}…"));
+                unpack(&zip, unpacked, name)?;
+                promote(unpacked, "pandoc", 0, staging)?;
+                Ok(file_name(&zip))
+            }
+            Pack::LibreOffice => {
+                let version = libreoffice_version()?;
+                let url = libreoffice_url(&version);
+                let dmg = w.join("LibreOffice.dmg");
+                let size = remote_size(&url);
+                download(&url, size, &dmg, name)?;
+                report(1.0, &format!("Setting up {name} (this takes a minute)…"));
+                let mnt = w.join("mnt");
+                fs::create_dir_all(&mnt).map_err(|e| e.to_string())?;
+                run(
+                    Command::new("/usr/bin/hdiutil").args(["attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint"]).arg(&mnt).arg(&dmg),
+                    name,
+                    5,
+                )?;
+                fs::create_dir_all(staging).map_err(|e| e.to_string())?;
+                let copied = run(
+                    Command::new("/usr/bin/ditto").arg(mnt.join("LibreOffice.app")).arg(staging.join("LibreOffice.app")),
+                    name,
+                    15,
+                );
+                let _ = Command::new("/usr/bin/hdiutil").args(["detach", "-quiet"]).arg(&mnt).output();
+                copied?;
+                Ok(format!("LibreOffice {version}"))
+            }
+            Pack::Magick | Pack::Poppler | Pack::Ghostscript => Err(format!("{name} comes with Convertino for Mac.")),
+        }
+    }
+
+    pub fn latest_source(pack: Pack) -> Result<String, String> {
+        let name = pack.name();
+        let asset = |repo: &str, pick: &dyn Fn(&str) -> bool| github_asset(repo, pick, name).map(|a| a.0);
+        match pack {
+            Pack::SevenZip => asset("ip7z/7zip", &seven_pick),
+            Pack::Pandoc => asset("jgm/pandoc", &pandoc_pick),
+            Pack::Ffmpeg => resolved(&ffmpeg_url())
+                .map(|u| u.rsplit('/').next().unwrap_or_default().to_string())
+                .ok_or_else(|| "Couldn't check FFmpeg for updates.".into()),
+            Pack::LibreOffice => libreoffice_version().map(|v| format!("LibreOffice {v}")),
+            _ => Err(format!("{name} updates with Convertino.")),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn mac_download_names() {
+            assert!(ffmpeg_url().contains("/macos/") && ffmpeg_url().ends_with("ffmpeg.zip"));
+            assert!(seven_pick("7z2603-mac.tar.xz") && !seven_pick("7z2603-linux-x64.tar.xz"));
+            assert!(pandoc_pick("pandoc-3.12-arm64-macOS.zip") || pandoc_pick("pandoc-3.12-x86_64-macOS.zip"));
+            assert!(!pandoc_pick("pandoc-3.12-arm64-macOS.pkg"));
+            let lo = libreoffice_url("26.2.1");
+            assert!(lo.contains("/26.2.1/mac/") && lo.ends_with(".dmg"), "{lo}");
+            assert!(Pack::Magick.bundled_on_mac() && !Pack::Ffmpeg.bundled_on_mac());
+        }
     }
 }

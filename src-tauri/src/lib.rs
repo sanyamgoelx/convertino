@@ -21,6 +21,10 @@ mod settings;
 mod tools;
 #[cfg(windows)]
 mod alt_click;
+#[cfg(target_os = "macos")]
+mod mac;
+#[cfg(target_os = "macos")]
+use mac as alt_click;
 mod selection;
 mod video;
 mod wheel;
@@ -225,6 +229,14 @@ fn ring_mode(app: AppHandle) -> RingLayout {
             }
         }
     }
+    #[cfg(target_os = "macos")]
+    {
+        alt_click::RING_ACTIVE.store(true, std::sync::atomic::Ordering::SeqCst);
+        // The wheel came from Finder (hotkey or Option+right-click): hand the focus back.
+        let _ = std::process::Command::new("/usr/bin/osascript")
+            .args(["-e", "tell application \"Finder\" to activate"])
+            .spawn();
+    }
     layout
 }
 
@@ -269,7 +281,7 @@ fn end_ring(app: &AppHandle) {
     if let Ok(mut r) = app.state::<AppState>().ring.lock() {
         *r = None;
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     alt_click::RING_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
     if let Some(win) = app.get_webview_window("wheel") {
         let _ = win.hide();
@@ -285,6 +297,21 @@ fn on_click_while_ring(app: &AppHandle, x: i32, y: i32) {
     let Some(win) = app.get_webview_window("wheel") else { return };
     if let (Ok(pos), Ok(size)) = (win.outer_position(), win.outer_size()) {
         let inside = x >= pos.x && y >= pos.y && x < pos.x + size.width as i32 && y < pos.y + size.height as i32;
+        if inside {
+            return;
+        }
+    }
+    let _ = win.emit("ring-away", ());
+}
+
+/// Mac: the same, with the click in screen points.
+#[cfg(target_os = "macos")]
+fn on_click_while_ring(app: &AppHandle, x: f64, y: f64) {
+    let Some(win) = app.get_webview_window("wheel") else { return };
+    let scale = win.scale_factor().unwrap_or(1.0);
+    if let (Ok(pos), Ok(size)) = (win.outer_position(), win.outer_size()) {
+        let (px, py) = (x * scale, y * scale);
+        let inside = px >= pos.x as f64 && py >= pos.y as f64 && px < (pos.x + size.width as i32) as f64 && py < (pos.y + size.height as i32) as f64;
         if inside {
             return;
         }
@@ -404,7 +431,7 @@ fn settings_set(app: AppHandle, patch: serde_json::Value) -> Result<SettingsView
     merge_json(&mut merged, patch);
     let next: settings::Settings = serde_json::from_value(merged).map_err(|e| format!("That setting isn't valid: {e}"))?;
     let after = settings::update(|s| *s = next);
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     alt_click::ENABLED.store(after.alt_click, Ordering::SeqCst);
     if after.start_at_login != before.start_at_login {
         settings::apply_start_at_login(after.start_at_login);
@@ -866,6 +893,77 @@ fn on_alt_click(app: &AppHandle, x: i32, y: i32, root: isize) {
     open_for_selection(app, selection, started, Some(PhysicalPosition::new(x as f64, y as f64)), "alt-click");
 }
 
+/// Option+right-click (Mac): the file under the pointer, or Finder's selection
+/// when the pointer is on one of the selected files (like a normal right-click).
+#[cfg(target_os = "macos")]
+fn on_option_click(app: &AppHandle, x: f64, y: f64) {
+    let started = Instant::now();
+    let selection = selection::current_selection();
+    let under = mac::item_at(x, y).map(|p| p.to_string_lossy().into_owned());
+    let selection = match (selection, under) {
+        (Ok(sel), Some(item)) if sel.paths.iter().any(|p| p.trim_end_matches('/') == item.trim_end_matches('/')) => Ok(sel),
+        (_, Some(item)) => Ok(selection::Selection { source: "Finder".into(), paths: vec![item] }),
+        (sel, None) => {
+            log::info!("option-click: no item found under the pointer; using Finder's selection");
+            sel
+        }
+    };
+    let cursor = app.cursor_position().ok();
+    open_for_selection(app, selection, started, cursor, "option-click");
+}
+
+/// Mac permissions, for the Permissions page of Settings.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Permissions {
+    mac: bool,
+    /// Option+right-click (Accessibility).
+    accessibility: bool,
+    /// The tap is running (it starts within two seconds of the permission).
+    alt_click_on: bool,
+    /// Reading Finder's selection: "granted", "denied", "not-asked" or "unknown".
+    finder: String,
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn permissions_get() -> Permissions {
+    Permissions {
+        mac: true,
+        accessibility: mac::accessibility_granted(),
+        alt_click_on: mac::alt_click_running(),
+        finder: mac::finder_automation(false).to_string(),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn permissions_get() -> Permissions {
+    Permissions { mac: false, accessibility: true, alt_click_on: true, finder: "granted".into() }
+}
+
+/// Asks for a permission: "accessibility" (prompt + System Settings),
+/// "finder" (macOS's own prompt; if it was refused before, System Settings).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn permissions_request(app: AppHandle, kind: String) {
+    if kind == "accessibility" {
+        mac::ask_accessibility();
+    } else if kind == "finder" {
+        std::thread::spawn(move || {
+            let state = mac::ask_finder_once();
+            if state == "denied" {
+                mac::open_settings("Privacy_Automation");
+            }
+            let _ = app.emit_to("settings", "settings-changed", ());
+        });
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn permissions_request(_app: AppHandle, _kind: String) {}
+
 /// Shared by the hotkey and Alt+right-click: log the selection, then open the
 /// wheel, or explain in the main window why there's nothing to show.
 fn open_for_selection(
@@ -1013,6 +1111,8 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             hotkey_status,
+            permissions_get,
+            permissions_request,
             settings_get,
             settings_set,
             shortcut_set,
@@ -1050,7 +1150,7 @@ pub fn run() {
             let config = app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir().join("Convertino"));
             let first_run = settings::init(config);
             let prefs = settings::get();
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             alt_click::ENABLED.store(prefs.alt_click, Ordering::SeqCst);
             // Keeps the startup entry pointing at this copy of Convertino (it may have moved).
             settings::apply_start_at_login(prefs.start_at_login);
@@ -1109,10 +1209,24 @@ pub fn run() {
                 let handle = app.handle().clone();
                 alt_click::on_click_while_ring(move |x, y| on_click_while_ring(&handle, x, y));
             }
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.handle().clone();
+                mac::install(move |x, y| on_option_click(&handle, x, y));
+                let handle = app.handle().clone();
+                mac::on_click_while_ring(move |x, y| on_click_while_ring(&handle, x, y));
+            }
             // The first time: Settings says hello (and shows the shortcut).
             let background = std::env::args().any(|a| a == "--background");
             if first_run && !background {
                 show_settings(app.handle(), None);
+            }
+            // Mac: anything not allowed yet opens Settings at the Permissions page.
+            #[cfg(target_os = "macos")]
+            {
+                if !background && (!mac::accessibility_granted() || mac::finder_automation(false) != "granted") {
+                    show_settings(app.handle(), Some("permissions"));
+                }
             }
             log::info!("Convertino started");
             Ok(())

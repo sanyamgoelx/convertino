@@ -7,3 +7,7 @@ Thumbs.db
 src-tauri/tools/
 test-files/
 .sync/
+checks.done
+.sync*/
+mac-check.cmd
+scripts/mac-check.ps1
