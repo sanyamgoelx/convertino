@@ -408,7 +408,7 @@ mod tests {
         let Some(im) = tools::find(Tool::Magick) else { return };
         let d = tmpdir("search");
         let src = d.join("photo.png");
-        assert!(std::process::Command::new(&im)
+        assert!(tools::command(&im)
             .args(["-size", "1400x900", "plasma:", "-blur", "0x1"])
             .arg(&src)
             .status()
@@ -429,7 +429,7 @@ mod tests {
         let Some(im) = tools::find(Tool::Magick) else { return };
         let d = tmpdir("png");
         let png = d.join("flat.png");
-        assert!(std::process::Command::new(&im)
+        assert!(tools::command(&im)
             .args(["-size", "600x400", "xc:skyblue", "-fill", "black", "-draw", "rectangle 50,50 300,200", "-define", "png:compression-level=0"])
             .arg(&png)
             .status()

@@ -1326,7 +1326,7 @@ mod tests {
         let d = tmpdir("real");
         if let Some(ff) = tools::find(Tool::Ffmpeg) {
             let wav = d.join("tone.wav");
-            assert!(Command::new(&ff)
+            assert!(tools::command(&ff)
                 .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2"])
                 .arg(&wav)
                 .status()
@@ -1339,7 +1339,7 @@ mod tests {
         }
         if let Some(im) = tools::find(Tool::Magick) {
             let png = d.join("pic.png");
-            assert!(Command::new(&im).args(["-size", "64x48", "gradient:red-blue"]).arg(&png).status().unwrap().success());
+            assert!(tools::command(&im).args(["-size", "64x48", "gradient:red-blue"]).arg(&png).status().unwrap().success());
             for target in ["image.jpg", "image.webp", "image.ico", "image.resize", "image.gif"] {
                 run_target(target, &[png.clone()]);
             }
@@ -1354,7 +1354,7 @@ mod tests {
         // An old-style AVI (MPEG-4 Part 2 + MP3) forces real encoding; a sharp,
         // high-bitrate picture makes sure Compress has something to save.
         let avi = d.join("clip.avi");
-        assert!(Command::new(&ff)
+        assert!(tools::command(&ff)
             .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30:duration=2"])
             .args(["-f", "lavfi", "-i", "sine=frequency=330:duration=2"])
             .args(["-c:v", "mpeg4", "-q:v", "1", "-c:a", "libmp3lame", "-shortest"])
@@ -1422,7 +1422,7 @@ mod tests {
             // No LibreOffice: make a two-page PDF from images so the PDF tools still get tested.
             let (a, b) = (d.join("p1.png"), d.join("p2.png"));
             for (p, c) in [(&a, "gradient:red-blue"), (&b, "gradient:green-white")] {
-                assert!(Command::new(&im).args(["-size", "200x280", c]).arg(p).status().unwrap().success());
+                assert!(tools::command(&im).args(["-size", "200x280", c]).arg(p).status().unwrap().success());
             }
             run_target("image.pdf", &[a, b]).remove(0)
         } else {
@@ -1456,7 +1456,7 @@ mod tests {
             if let Some(im) = tools::find(Tool::Magick) {
                 // A photo stored at 600 DPI shrinks a lot at the /ebook setting.
                 let big = d.join("scan.pdf");
-                assert!(Command::new(&im)
+                assert!(tools::command(&im)
                     .args(["-size", "2400x3000", "plasma:", "-quality", "95", "-density", "600"])
                     .arg(&big)
                     .status()
