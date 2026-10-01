@@ -93,6 +93,7 @@ jobs:
           ls "$app/Contents/Resources/tools"
           "$app/Contents/Resources/tools/imagemagick/magick" -version | head -1 || true
           codesign --verify --deep --verbose=2 "$app" || true
+          codesign -d --entitlements - "$app" 2>&1 | grep -q automation.apple-events || { echo "Missing apple-events entitlement"; exit 1; }
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
