@@ -14,7 +14,7 @@ use crate::{archive, data, procs, video};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -478,15 +478,81 @@ pub(crate) fn writable_dir(dir: &Path) -> PathBuf {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => dir.to_path_buf(),
         Err(e) => {
             let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
-            match home.map(|h| PathBuf::from(h).join("Downloads")).filter(|d| d.is_dir()) {
+            match home.map(|h| PathBuf::from(h).join("Downloads")).filter(|d| d.is_dir() && d != dir) {
                 Some(downloads) => {
-                    log::info!("can't write to {} ({e}); saving to {}", dir.display(), downloads.display());
+                    let why = Blocked::of(&e);
+                    log::warn!("can't write to {} ({e}, {why:?}); saving to {}", dir.display(), downloads.display());
+                    if let Ok(mut m) = blocked().lock() {
+                        m.insert(dir.to_path_buf(), why);
+                    }
                     downloads
                 }
                 None => dir.to_path_buf(),
             }
         }
     }
+}
+
+/// Why a folder couldn't be written, so the done card can say so (and how to fix it).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Blocked {
+    /// Windows Security's ransomware protection ("Controlled folder access").
+    RansomwareProtection,
+    /// macOS privacy settings (Files and Folders / Full Disk Access).
+    MacPrivacy,
+    /// No permission (another user's folder, a protected system folder).
+    Denied,
+    /// A read-only drive, disc or share.
+    ReadOnly,
+}
+
+impl Blocked {
+    fn of(e: &std::io::Error) -> Blocked {
+        match e.raw_os_error() {
+            // ERROR_ACCESS_DENIED
+            Some(5) if cfg!(windows) && ransomware_protection_on() => Blocked::RansomwareProtection,
+            Some(5) if cfg!(windows) => Blocked::Denied,
+            // ERROR_WRITE_PROTECT, EROFS
+            Some(19) if cfg!(windows) => Blocked::ReadOnly,
+            Some(30) if !cfg!(windows) => Blocked::ReadOnly,
+            // EPERM: macOS privacy controls
+            Some(1) if cfg!(target_os = "macos") => Blocked::MacPrivacy,
+            _ => Blocked::Denied,
+        }
+    }
+}
+
+/// Folders Convertino couldn't write this session, and why.
+pub(crate) fn blocked() -> &'static Mutex<HashMap<PathBuf, Blocked>> {
+    static B: OnceLock<Mutex<HashMap<PathBuf, Blocked>>> = OnceLock::new();
+    B.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Windows Security's "Controlled folder access" (blocks unknown apps from
+/// writing in Documents, Pictures, Videos, Music and Desktop).
+#[cfg(windows)]
+fn ransomware_protection_on() -> bool {
+    use std::os::windows::process::CommandExt;
+    const NO_WINDOW: u32 = 0x0800_0000;
+    let key = r"HKLM\SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard\Controlled Folder Access";
+    let policy = r"HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Windows Defender Exploit Guard\Controlled Folder Access";
+    [key, policy].iter().any(|k| {
+        std::process::Command::new("reg.exe")
+            .args(["query", k, "/v", "EnableControlledFolderAccess"])
+            .creation_flags(NO_WINDOW)
+            .output()
+            .map(|o| {
+                let t = String::from_utf8_lossy(&o.stdout);
+                // "EnableControlledFolderAccess    REG_DWORD    0x1" (2 = audit only)
+                t.lines().any(|l| l.contains("EnableControlledFolderAccess") && l.trim_end().ends_with("0x1"))
+            })
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(not(windows))]
+fn ransomware_protection_on() -> bool {
+    false
 }
 
 // ---------- running ----------

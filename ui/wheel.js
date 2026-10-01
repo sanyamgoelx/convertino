@@ -290,7 +290,7 @@ function pick(s, args) {
     const got = early.get(id) || {};
     early.delete(id);
     // Failed straight away (nothing to convert, say): straight to the corner card.
-    if (got.done && !got.done.ok) return tauri.core.invoke("ring_handoff", { id });
+    if (got.done && (!got.done.ok || got.done.attention)) return tauri.core.invoke("ring_handoff", { id });
     const layout = await tauri.core.invoke("ring_mode");
     if (openCount !== openedAs) return;
     startRing(id, s.label, layout.flip, pickedAt);
@@ -331,7 +331,7 @@ function ringProgress(p) {
 
 function ringDone(d) {
   if (!ring || ring.gone) return;
-  if (!d.ok) return handOff(); // errors need room to read: the corner card
+  if (!d.ok || d.attention) return handOff(); // errors and notes need room to read: the corner card
   clearTimeout(ring.handoff);
   ring.done = true;
   ringProg.style.strokeDashoffset = 0;

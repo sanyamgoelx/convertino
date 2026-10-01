@@ -58,6 +58,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          CONVERTINO_REPORT_WEBHOOK: ${{ secrets.CONVERTINO_REPORT_WEBHOOK }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Convertino ${{ github.ref_name }}"

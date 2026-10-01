@@ -309,6 +309,17 @@ function moveTo(key, targetKey, after) {
   ui.sel = new Set(moved.map((p) => p.key));
   refresh();
 }
+function nudgeSelected(by) {
+  if (!ui.sel.size) return;
+  const idx = st.pages.map((p, i) => (ui.sel.has(p.key) ? i : -1)).filter((i) => i >= 0);
+  if (by < 0 ? idx[0] === 0 : idx[idx.length - 1] === st.pages.length - 1) return;
+  record();
+  const pages = st.pages.slice();
+  const order = by < 0 ? idx : idx.slice().reverse();
+  for (const i of order) [pages[i], pages[i + by]] = [pages[i + by], pages[i]];
+  st.pages = pages;
+  refresh();
+}
 function rotateSelected(by) {
   if (!ui.sel.size) return;
   record();
@@ -1113,7 +1124,7 @@ function updateStatus() {
   const left = $("#status-left"), right = $("#status-right");
   if (ui.mode === "pages") {
     left.textContent = `${n} page${n === 1 ? "" : "s"}${ui.sel.size ? ` · ${ui.sel.size} selected` : ""}`;
-    right.textContent = "Drag pages to reorder · Ctrl+click or Shift+click to pick several · double-click to mark up";
+    right.textContent = `Drag pages (or ${isMac ? "⌥←/→" : "Alt+←/→"}) to reorder · Ctrl+click or Shift+click to pick several · double-click to mark up`;
   } else {
     const i = st.pages.findIndex((p) => p.key === ui.current) + 1;
     left.textContent = `Page ${i} of ${n}${ui.fieldCount ? " · the blue boxes are form fields you can fill in" : ""}`;
@@ -1188,6 +1199,8 @@ function wireChrome() {
       if (mod && k === "a") { e.preventDefault(); ui.sel = new Set(st.pages.map((p) => p.key)); return refresh(); }
       if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); return deleteSelected(); }
       if (e.key === "Escape") { ui.sel.clear(); return refresh(); }
+      // Alt+←/→ (Option on Mac) moves the selected pages one place.
+      if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); return nudgeSelected(e.key === "ArrowLeft" ? -1 : 1); }
     } else {
       if ((e.key === "Delete" || e.key === "Backspace") && ui.picked) { e.preventDefault(); return removePicked(); }
       if (e.key === "Escape") { $("#sig-dialog").hidden = true; return setTool("select"); }

@@ -54,6 +54,19 @@ struct Done {
     title: String,
     body: String,
     can_undo: bool,
+    /// Something the person should read even though it worked (saved in
+    /// another folder, some files failed): the ring hands it to the card.
+    attention: bool,
+    /// A button that helps: "windows-security" or "mac-privacy".
+    fix: Option<&'static str>,
+    /// The card offers "Send report" (a failure, and reports are set up).
+    report: bool,
+}
+
+impl Done {
+    fn plain(id: u64, ok: bool, title: String, body: String, can_undo: bool) -> Done {
+        Done { id, ok, title, body, can_undo, attention: false, fix: None, report: false }
+    }
 }
 
 fn human_size(bytes: u64) -> String {
@@ -112,13 +125,13 @@ pub fn start(
         if let Some(dialog) = wait_for_dialog {
             if let Err(reason) = wait_for_save(&app, id, dialog, &files) {
                 let cancelled = reason == crate::procs::CANCELLED;
-                emit(&app, "job-done", Done {
+                emit(&app, "job-done", Done::plain(
                     id,
-                    ok: false,
-                    title: if cancelled { "Cancelled".into() } else { "Nothing was saved".into() },
-                    body: if cancelled { "Nothing was converted.".into() } else { reason },
-                    can_undo: false,
-                });
+                    false,
+                    if cancelled { "Cancelled".into() } else { "Nothing was saved".into() },
+                    if cancelled { "Nothing was converted.".into() } else { reason },
+                    false,
+                ));
                 return;
             }
         }
@@ -128,7 +141,8 @@ pub fn start(
             Ok(s) => s,
             Err(reason) => {
                 log::info!("job {id}: {target_id} not available: {reason}");
-                emit(&app, "job-done", Done { id, ok: false, title: format!("Can't convert to {label} yet"), body: reason, can_undo: false });
+                let report = crate::report::remember(id, &target_id, &files, &[reason.clone()]);
+                emit(&app, "job-done", Done { report, ..Done::plain(id, false, format!("Can't convert to {label} yet"), reason, false) });
                 return;
             }
         };
@@ -139,44 +153,50 @@ pub fn start(
         log::info!("job {id}: {} made, {} failed, {:?}", made.len(), errors.len(), started.elapsed());
 
         let size: u64 = made.iter().map(|p| disk_size(p)).sum();
-        // Saved somewhere else because the original's folder is read-only.
-        let elsewhere = made
-            .iter()
-            .find(|p| p.parent() != files.first().and_then(|f| f.parent()))
-            .and_then(|p| p.parent())
-            .map(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| d.display().to_string()));
+        let report = !errors.is_empty() && crate::report::remember(id, &target_id, &files, &errors);
         let done = if cancelled {
-            Done {
+            Done::plain(
                 id,
-                ok: !made.is_empty(),
-                title: "Cancelled".into(),
-                body: if made.is_empty() {
+                !made.is_empty(),
+                "Cancelled".into(),
+                if made.is_empty() {
                     "Nothing was saved.".into()
                 } else {
                     format!("{} of {total} converted before you cancelled.", made.len())
                 },
-                can_undo: !made.is_empty(),
-            }
+                !made.is_empty(),
+            )
         } else if made.is_empty() {
             Done {
-                id,
-                ok: false,
-                title: format!("Couldn't convert to {label}"),
-                body: errors.first().cloned().unwrap_or_else(|| "Unknown error".into()),
-                can_undo: false,
+                report,
+                ..Done::plain(
+                    id,
+                    false,
+                    format!("Couldn't convert to {label}"),
+                    errors.first().cloned().unwrap_or_else(|| "Unknown error".into()),
+                    false,
+                )
             }
         } else {
             let mut body = match made.as_slice() {
                 [one] => format!("{} · {}", file_name(one), human_size(size)),
                 many => format!("{} files · {}", many.len(), human_size(size)),
             };
-            if let Some(folder) = &elsewhere {
-                body.push_str(&format!(" · saved in {folder} (the original folder is read-only)"));
+            // Saved somewhere else because the original's folder couldn't be written.
+            let mut fix = None;
+            if let Some((folder, saved_in, why)) = moved_elsewhere(&files, &made) {
+                body = format!("{body}\nSaved in {saved_in}: {}", why_text(why, &folder));
+                fix = match why {
+                    convert::Blocked::RansomwareProtection => Some("windows-security"),
+                    convert::Blocked::MacPrivacy => Some("mac-privacy"),
+                    _ => None,
+                };
             }
             if !errors.is_empty() {
-                body.push_str(&format!(" · {} failed: {}", errors.len(), errors[0]));
+                body.push_str(&format!("\n{} failed: {}", errors.len(), errors[0]));
             }
-            Done { id, ok: true, title: done_title(&target_id, &label), body, can_undo: true }
+            let attention = fix.is_some() || body.contains('\n');
+            Done { id, ok: true, title: done_title(&target_id, &label), body, can_undo: true, attention, fix, report }
         };
         if let Ok(mut o) = outputs().lock() {
             o.insert(id, made);
@@ -184,6 +204,32 @@ pub fn start(
         emit(&app, "job-done", done);
     });
     id
+}
+
+/// The first original whose folder couldn't be written: (that folder's name,
+/// where the result went instead, why).
+fn moved_elsewhere(files: &[PathBuf], made: &[PathBuf]) -> Option<(String, String, convert::Blocked)> {
+    let blocked = convert::blocked().lock().ok()?;
+    let name = |d: &std::path::Path| d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| d.display().to_string());
+    files.iter().filter_map(|f| f.parent()).find_map(|dir| {
+        let why = *blocked.get(dir)?;
+        let saved = made.iter().filter_map(|m| m.parent()).find(|p| *p != dir)?;
+        Some((name(dir), name(saved), why))
+    })
+}
+
+/// Why the result isn't next to the original, in plain words.
+fn why_text(why: convert::Blocked, folder: &str) -> String {
+    match why {
+        convert::Blocked::RansomwareProtection => format!(
+            "Windows Security's ransomware protection doesn't let new apps save in {folder}. To save next to your files, allow Convertino there."
+        ),
+        convert::Blocked::MacPrivacy => format!(
+            "macOS didn't let Convertino save in {folder}. Allow it under Privacy & Security › Files and Folders."
+        ),
+        convert::Blocked::ReadOnly => format!("{folder} is read-only."),
+        convert::Blocked::Denied => format!("Convertino isn't allowed to save in {folder}."),
+    }
 }
 
 /// Longest wait for a Save dialog to be used.
@@ -237,7 +283,7 @@ pub fn saved(app: &AppHandle, path: PathBuf) -> u64 {
         o.insert(id, vec![path]);
     }
     crate::show_hud(app);
-    emit(app, "job-done", Done { id, ok: true, title: "Saved".into(), body, can_undo: true });
+    emit(app, "job-done", Done::plain(id, true, "Saved".into(), body, true));
     id
 }
 

@@ -1,4 +1,4 @@
-# Puts Convertino on GitHub as a public repository (one time), then pushes.
+﻿# Puts Convertino on GitHub as a public repository (one time), then pushes.
 # Sign-in uses the GitHub CLI: it shows a one-time code and opens github.com in your browser.
 # No password is typed here, and the sign-in stays on this PC.
 $ErrorActionPreference = "Continue"  # git and gh write progress to stderr
@@ -41,8 +41,11 @@ Say "Signed in as: $user"
 git config --global github.user $user
 
 if (-not (Test-Path ".git")) { git init -b main | Out-Null; Say "Made a git repository here." }
-if (-not (git config user.name)) { git config user.name $user }
-if (-not (git config user.email)) { git config user.email "$user@users.noreply.github.com" }
+# Commits here are always credited to the signed-in account (repo setting,
+# so another identity in the global git config isn't used for Convertino).
+$uid = (& $gh api user --jq .id).Trim()
+git config user.name $user
+git config user.email "$uid+$user@users.noreply.github.com"
 git config core.autocrlf true
 
 # A leftover lock (an interrupted git command) would stop the commit.

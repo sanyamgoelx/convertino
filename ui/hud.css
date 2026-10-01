@@ -61,7 +61,7 @@ html, body { margin: 0; background: transparent; overflow: hidden; font: 13px/1.
 .head .x { margin-left: auto; border: 0; background: none; color: var(--ink-3); font: inherit; font-size: 13px; cursor: pointer; padding: 0 2px; }
 .head .x:hover { color: var(--ink); }
 .title { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.body { color: var(--ink-2); overflow-wrap: anywhere; }
+.body { color: var(--ink-2); overflow-wrap: anywhere; white-space: pre-line; }
 .card.bad .title { color: var(--bad); }
 
 .bar { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
@@ -81,6 +81,7 @@ html, body { margin: 0; background: transparent; overflow: hidden; font: 13px/1.
 }
 .buttons button:hover { background: var(--btn-hover); }
 .buttons button:disabled { opacity: 0.5; cursor: default; }
+.buttons button:last-child:nth-child(odd) { grid-column: 1 / -1; }
 :root[data-os="mac"] .buttons button { border-radius: 7px; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition-duration: 0s !important; } }

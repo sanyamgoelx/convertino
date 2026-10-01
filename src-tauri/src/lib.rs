@@ -17,6 +17,7 @@ mod install;
 mod jobs;
 mod look;
 mod procs;
+mod report;
 mod settings;
 mod tools;
 mod update;
@@ -334,6 +335,27 @@ fn job_cancel(id: u64) {
 #[tauri::command]
 fn job_undo(id: u64) -> Result<usize, String> {
     jobs::undo(id)
+}
+
+/// "Send report" on a failed job's card.
+#[tauri::command]
+async fn job_report(app: AppHandle, id: u64, note: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || report::send(&app, id, note))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The card's fix button when the system stopped Convertino saving next to a file.
+#[tauri::command]
+fn open_fix(kind: String) -> Result<(), String> {
+    let target = match kind.as_str() {
+        // Windows Security: Virus & threat protection (Ransomware protection is on that page).
+        "windows-security" if cfg!(windows) => "windowsdefender://threatsettings",
+        "mac-privacy" if cfg!(target_os = "macos") => "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders",
+        _ => return Err("Nothing to open here.".into()),
+    };
+    let program = if cfg!(windows) { "explorer.exe" } else { "open" };
+    std::process::Command::new(program).arg(target).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// The HUD reports its content height; 0 hides it.
@@ -768,6 +790,9 @@ fn open_editor(app: &AppHandle, path: PathBuf) {
             .min_inner_size(900.0, 600.0)
             .center()
             .focused(true)
+            // Tauri's own file-drop handling swallows the page's drag and drop
+            // on Windows, which the page grid uses to reorder pages.
+            .disable_drag_drop_handler()
             .build();
         if let Err(e) = built {
             log::error!("couldn't open the PDF editor: {e}");
@@ -1154,6 +1179,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             hotkey_status,
             open_link,
+            job_report,
+            open_fix,
             update::update_check,
             update::update_status,
             update::update_install,
