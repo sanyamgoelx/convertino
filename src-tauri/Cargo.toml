@@ -1,6 +1,6 @@
 [package]
 name = "convertino"
-version = "0.1.0"
+version = "0.1.1"
 description = "Convert any file from a radial wheel in Explorer or Finder"
 authors = ["Crofty"]
 license = "GPL-3.0-or-later"
