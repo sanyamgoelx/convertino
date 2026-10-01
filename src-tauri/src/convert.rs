@@ -469,13 +469,23 @@ pub(crate) fn output_dir(dir: &Path) -> PathBuf {
 }
 
 pub(crate) fn writable_dir(dir: &Path) -> PathBuf {
-    let probe = dir.join(format!(".convertino-write-test-{}", std::process::id()));
-    match std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe);
-            dir.to_path_buf()
+    // Two tries, the second with an ordinary name: security software can
+    // refuse hidden dot-files on their own.
+    let probe = |name: String| -> std::io::Result<()> {
+        let p = dir.join(name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
+            Ok(_) => {
+                let _ = std::fs::remove_file(&p);
+                Ok(())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(e),
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => dir.to_path_buf(),
+    };
+    let pid = std::process::id();
+    let tried = probe(format!(".convertino-write-test-{pid}")).or_else(|_| probe(format!("convertino-write-test-{pid}.tmp")));
+    match tried {
+        Ok(()) => dir.to_path_buf(),
         Err(e) => {
             let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
             match home.map(|h| PathBuf::from(h).join("Downloads")).filter(|d| d.is_dir() && d != dir) {
@@ -509,11 +519,12 @@ pub(crate) enum Blocked {
 impl Blocked {
     fn of(e: &std::io::Error) -> Blocked {
         match e.raw_os_error() {
-            // ERROR_ACCESS_DENIED
-            Some(5) if cfg!(windows) && ransomware_protection_on() => Blocked::RansomwareProtection,
-            Some(5) if cfg!(windows) => Blocked::Denied,
-            // ERROR_WRITE_PROTECT, EROFS
+            // ERROR_WRITE_PROTECT
             Some(19) if cfg!(windows) => Blocked::ReadOnly,
+            // Ransomware protection refuses with "access denied" or, oddly,
+            // "file not found" (seen in Videos on a friend's PC).
+            _ if cfg!(windows) && ransomware_protection_on() => Blocked::RansomwareProtection,
+            // EROFS
             Some(30) if !cfg!(windows) => Blocked::ReadOnly,
             // EPERM: macOS privacy controls
             Some(1) if cfg!(target_os = "macos") => Blocked::MacPrivacy,
@@ -526,6 +537,39 @@ impl Blocked {
 pub(crate) fn blocked() -> &'static Mutex<HashMap<PathBuf, Blocked>> {
     static B: OnceLock<Mutex<HashMap<PathBuf, Blocked>>> = OnceLock::new();
     B.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The same, asked once per run of Convertino.
+fn ransomware_protection_on_cached() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(ransomware_protection_on)
+}
+
+/// Moves a finished file or folder into place (copying across drives).
+fn move_into(from: &Path, to: &Path) -> Result<(), String> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    fn copy(from: &Path, to: &Path) -> std::io::Result<()> {
+        if from.is_dir() {
+            std::fs::create_dir_all(to)?;
+            for e in std::fs::read_dir(from)? {
+                let e = e?;
+                copy(&e.path(), &to.join(e.file_name()))?;
+            }
+            Ok(())
+        } else {
+            std::fs::copy(from, to).map(|_| ())
+        }
+    }
+    copy(from, to).map_err(|e| {
+        if to.is_dir() {
+            let _ = std::fs::remove_dir_all(to);
+        } else {
+            let _ = std::fs::remove_file(to);
+        }
+        format!("Couldn't save the result in {}: {e}", to.parent().map(|p| p.display().to_string()).unwrap_or_default())
+    })
 }
 
 /// Windows Security's "Controlled folder access" (blocks unknown apps from
@@ -698,13 +742,38 @@ pub fn run(step: &Step, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String
     step.dir = output_dir(&step.dir);
     let step = &step;
     let name = Reserved::new(&step.dir, &step.stem, if step.folder { "" } else { &step.ext });
-    let output = name.0.clone();
+    let reserved = name.0.clone();
+    // With Windows' ransomware protection on, only Convertino itself may be
+    // allowed into Documents, Videos and so on, not each converter: the
+    // converter writes into a scratch folder and Convertino moves the result.
+    let staging = if ransomware_protection_on_cached() { Some(TempDir::new("out")?) } else { None };
+    let output = match &staging {
+        Some(t) => t.0.join(reserved.file_name().unwrap_or_default()),
+        None => reserved.clone(),
+    };
     if step.folder {
         std::fs::create_dir_all(&output).map_err(|e| format!("Couldn't create {}: {e}", output.display()))?;
     }
     let result = run_op(step, &output, progress);
     // Cancelled while the tool was finishing: treat it as cancelled all the same.
     let result = if result.is_ok() && procs::cancelled_here() { Err(procs::CANCELLED.to_string()) } else { result };
+    let result = match (result, &staging) {
+        (Ok(made), Some(_)) if made.exists() => {
+            let name = made.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let dest = if made == output {
+                reserved.clone()
+            } else {
+                let p = Path::new(&name);
+                let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(name.clone());
+                let ext = p.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+                let r = Reserved::new(&step.dir, &stem, &ext);
+                r.0.clone()
+            };
+            move_into(&made, &dest).map(|_| dest)
+        }
+        (r, _) => r,
+    };
+    let output = if staging.is_some() { reserved.clone() } else { output };
     match result {
         Ok(final_path) => {
             if final_path != output && output.exists() && step.folder {

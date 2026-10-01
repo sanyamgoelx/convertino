@@ -188,6 +188,7 @@ pub fn start(
                 body = format!("{body}\nSaved in {saved_in}: {}", why_text(why, &folder));
                 fix = match why {
                     convert::Blocked::RansomwareProtection => Some("windows-security"),
+                    convert::Blocked::Denied if cfg!(windows) => Some("windows-security"),
                     convert::Blocked::MacPrivacy => Some("mac-privacy"),
                     _ => None,
                 };
@@ -228,6 +229,9 @@ fn why_text(why: convert::Blocked, folder: &str) -> String {
             "macOS didn't let Convertino save in {folder}. Allow it under Privacy & Security › Files and Folders."
         ),
         convert::Blocked::ReadOnly => format!("{folder} is read-only."),
+        convert::Blocked::Denied if cfg!(windows) => format!(
+            "Windows didn't let Convertino save in {folder}. Security software can do this: in Windows Security, ransomware protection blocks new apps in Documents, Pictures, Videos and Desktop."
+        ),
         convert::Blocked::Denied => format!("Convertino isn't allowed to save in {folder}."),
     }
 }

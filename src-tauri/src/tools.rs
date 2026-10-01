@@ -39,7 +39,10 @@ impl Tool {
     fn layout(self) -> (&'static [&'static str], &'static [&'static str]) {
         match self {
             Tool::Ffmpeg => (&["ffmpeg/ffmpeg"], &["ffmpeg"]),
-            // ImageMagick 6 on some systems only has `convert`.
+            // ImageMagick 6 on some systems only has `convert`. Never on
+            // Windows: there `convert` is the system's disk converter
+            // (C:\Windows\System32\convert.exe), which answers "Invalid Parameter".
+            Tool::Magick if cfg!(windows) => (&["imagemagick/magick"], &["magick"]),
             Tool::Magick => (&["imagemagick/magick"], &["magick", "convert"]),
             Tool::Pdftoppm => (&["poppler/bin/pdftoppm", "poppler/pdftoppm"], &["pdftoppm"]),
             Tool::Pdftotext => (&["poppler/bin/pdftotext", "poppler/pdftotext"], &["pdftotext"]),
@@ -141,6 +144,10 @@ pub fn find(tool: Tool) -> Option<PathBuf> {
     }
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
+        // Programs in the Windows folder share names with converters (convert.exe).
+        if is_windows_dir(&dir) {
+            continue;
+        }
         for name in on_path {
             let p = dir.join(exe(name));
             if p.is_file() {
@@ -149,6 +156,18 @@ pub fn find(tool: Tool) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn is_windows_dir(dir: &Path) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    let windir = std::env::var_os("SystemRoot").or_else(|| std::env::var_os("windir")).map(PathBuf::from);
+    let d = dir.to_string_lossy().to_lowercase().replace('/', "\\");
+    match windir {
+        Some(w) => d.starts_with(&w.to_string_lossy().to_lowercase().replace('/', "\\")),
+        None => d.starts_with("c:\\windows"),
+    }
 }
 
 /// The tool's path. A missing converter is downloaded first (progress goes
