@@ -63,7 +63,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "app",
+      "dmg"
+    ],
     "publisher": "Crofty",
     "copyright": "Copyright (C) 2026 Crofty. GPL-3.0-or-later.",
     "license": "GPL-3.0-or-later",
@@ -79,11 +83,32 @@
     ],
     "macOS": {
       "signingIdentity": "-",
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "dmg": {
+        "background": "installer/dmg-background.tiff",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 170,
+          "y": 180
+        },
+        "applicationFolderPosition": {
+          "x": 490,
+          "y": 180
+        }
+      }
     },
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "template": "installer/installer.nsi",
+        "installerHooks": "installer/ui.nsh",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
       }
     },
     "createUpdaterArtifacts": true

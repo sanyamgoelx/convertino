@@ -48,6 +48,10 @@ jobs:
       - name: Install JS dependencies
         run: npm install
 
+      - name: Retina background for the .dmg window
+        if: runner.os == 'macOS'
+        run: tiffutil -cathidpicheck src-tauri/installer/dmg-background.png src-tauri/installer/dmg-background@2x.png -out src-tauri/installer/dmg-background.tiff
+
       - name: Bundle the Mac converters
         if: runner.os == 'macOS'
         run: |
@@ -93,7 +97,6 @@ jobs:
         with:
           name: convertino-${{ matrix.name }}
           path: |
-            src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error

@@ -44,6 +44,10 @@ jobs:
       - name: Install JS dependencies
         run: npm install
 
+      - name: Retina background for the .dmg window
+        if: runner.os == 'macOS'
+        run: tiffutil -cathidpicheck src-tauri/installer/dmg-background.png src-tauri/installer/dmg-background@2x.png -out src-tauri/installer/dmg-background.tiff
+
       - name: Bundle the Mac converters
         if: runner.os == 'macOS'
         run: bash ci/bundle-mac-tools.sh src-tauri/mac-tools

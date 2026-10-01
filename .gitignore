@@ -11,3 +11,4 @@ checks.done
 .sync*/
 mac-check.cmd
 scripts/mac-check.ps1
+src-tauri/installer/dmg-background.tiff
