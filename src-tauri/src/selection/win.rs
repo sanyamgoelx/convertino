@@ -31,7 +31,7 @@ use ::windows::Win32::UI::Shell::{
     SID_STopLevelBrowser, SIGDN_FILESYSPATH, SWC_DESKTOP, SWFO_NEEDDISPATCH,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, FindWindowExW, GetClassNameW, GetDlgItem, GetForegroundWindow, GetParent,
+    EnumChildWindows, FindWindowExW, GetClassNameW, GetDlgCtrlID, GetForegroundWindow, GetParent,
     SendMessageTimeoutW, SMTO_ABORTIFHUNG, WM_GETTEXT,
 };
 
@@ -264,15 +264,34 @@ fn dialog_selected_names(view: isize) -> Vec<String> {
     .unwrap_or_default()
 }
 
-/// The "File name" box and the "Save as type" list (standard control ids).
-unsafe fn dialog_name_and_type(dlg: HWND) -> (String, String) {
-    let name = GetDlgItem(Some(dlg), 0x47C)
-        .ok()
-        .and_then(|combo| descendants(combo).into_iter().find(|h| class_name(*h) == "Edit"))
-        .or_else(|| GetDlgItem(Some(dlg), 0x480).ok())
+/// A control anywhere inside the dialog by its id (the modern dialog nests
+/// them a few windows deep, so GetDlgItem on the dialog alone misses them).
+unsafe fn control(all: &[HWND], id: i32) -> Option<HWND> {
+    all.iter().copied().find(|h| GetDlgCtrlID(*h) == id)
+}
+
+/// The "File name" box and the "Save as type" list. Classic dialogs use the
+/// standard ids; the modern one puts the name box (an Edit, id 1001) in an
+/// unnumbered ComboBox, and the type list is the ComboBox showing "(*.ext)".
+unsafe fn dialog_name_and_type(all: &[HWND]) -> (String, String) {
+    const ADDRESS: i32 = 0xA205;
+    let in_combo = |h: HWND| GetParent(h).map(|p| class_name(p) == "ComboBox" && GetDlgCtrlID(p) != ADDRESS).unwrap_or(false);
+    let name_box = control(all, 0x47C)
+        .and_then(|c| if class_name(c) == "Edit" { Some(c) } else { descendants(c).into_iter().find(|h| class_name(*h) == "Edit") })
+        .or_else(|| all.iter().copied().find(|h| class_name(*h) == "Edit" && GetDlgCtrlID(*h) == 0x3E9))
+        .or_else(|| control(all, 0x480))
+        .or_else(|| all.iter().copied().find(|h| class_name(*h) == "Edit" && GetDlgCtrlID(*h) != ADDRESS && in_combo(*h)));
+    let name = name_box.map(|h| text_of(h)).unwrap_or_default();
+    let kind = control(all, 0x470)
         .map(|h| text_of(h))
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            all.iter()
+                .filter(|h| class_name(**h) == "ComboBox")
+                .map(|h| text_of(*h))
+                .find(|s| s.contains("*."))
+        })
         .unwrap_or_default();
-    let kind = GetDlgItem(Some(dlg), 0x470).ok().map(|h| text_of(h)).unwrap_or_default();
     (name, kind)
 }
 
@@ -290,7 +309,8 @@ unsafe fn dialog_selection(dlg: HWND) -> Res<Selection> {
     if !paths.is_empty() {
         return Ok(Selection { source: "File dialog".into(), paths: strings(paths), ..Default::default() });
     }
-    let (typed, kind) = dialog_name_and_type(dlg);
+    let (typed, kind) = dialog_name_and_type(&all);
+    log::info!("file dialog: folder {}, selected {selected:?}, name box {typed:?}, type {kind:?}", folder.display());
     let names = dialog::parse_names(&typed);
     let paths = dialog::resolve(&folder, &names);
     if !paths.is_empty() {
