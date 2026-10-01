@@ -1,4 +1,4 @@
-﻿; Convertino: Tauri's NSIS template (tauri-bundler 2.10) with the wizard
+; Convertino: Tauri's NSIS template (tauri-bundler 2.10) with the wizard
 ; pages replaced by one dark window (ui.nsh). Everything else (sections,
 ; updates with /P /UPDATE, uninstaller) is Tauri's, unchanged.
 Unicode true

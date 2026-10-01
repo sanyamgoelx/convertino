@@ -1,4 +1,4 @@
-﻿; Convertino's Windows installer look: one dark window, no wizard.
+; Convertino's Windows installer look: one dark window, no wizard.
 ;
 ;   Welcome   logo, name, [Install], install location (Change)
 ;   Progress  logo, "Installing Convertino…", thin blue bar
