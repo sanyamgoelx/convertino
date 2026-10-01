@@ -295,21 +295,6 @@ dialog td:nth-child(2) { color: var(--ink-2); }
   }
 }
 :root[data-os="mac"] body { font-size: 13px; }
-:root[data-os="mac"] .app { flex-direction: column; }
-:root[data-os="mac"] .nav {
-  width: auto; flex-direction: row; justify-content: center; gap: 4px; padding: 8px 16px;
-  background: var(--toolbar); border-bottom: 1px solid var(--card-line);
-}
-:root[data-os="mac"] .nav button {
-  width: 80px; height: 52px; flex-direction: column; justify-content: center; gap: 3px; padding: 0;
-  border-radius: 6px; font-size: 11px; color: var(--ink-2); text-align: center;
-}
-:root[data-os="mac"] .nav button .ic { width: 22px; height: 22px; }
-:root[data-os="mac"] .nav button[aria-current="page"] { color: var(--accent); }
-:root[data-os="mac"] .nav button[aria-current="page"]::before { display: none; }
-:root[data-os="mac"] .main { padding: 20px 32px 40px; }
-:root[data-os="mac"] h1 { display: none; }
-:root[data-os="mac"] section { max-width: 760px; margin: 0 auto; gap: 8px; }
 :root[data-os="mac"] .card { border-radius: 10px; padding: 10px 14px; gap: 10px; }
 :root[data-os="mac"] .card.row { min-height: 46px; padding: 6px 14px; }
 :root[data-os="mac"] .card.list { padding: 0; }
@@ -335,3 +320,27 @@ dialog td:nth-child(2) { color: var(--ink-2); }
 :root[data-os="mac"] .tip { border-radius: 10px; }
 :root[data-os="mac"] dialog { border-radius: 12px; }
 :root[data-os="mac"] .item, :root[data-os="mac"] .qrow, :root[data-os="mac"] .tool { padding-left: 14px; padding-right: 14px; }
+
+/* ---------- Layout on both systems: tabs along the top (the Mac board's layout) ---------- */
+:root { --toolbar: #ebebeb; }
+@media (prefers-color-scheme: dark) { :root { --toolbar: #1c1c1c; } }
+.app { flex-direction: column; }
+.nav {
+  width: auto; flex: none; flex-direction: row; justify-content: center; gap: 4px; padding: 8px 16px;
+  background: var(--toolbar); border-bottom: 1px solid var(--card-line);
+}
+.nav button {
+  width: 84px; height: 54px; flex-direction: column; justify-content: center; gap: 4px; padding: 0;
+  border-radius: 6px; font-size: 12px; color: var(--ink-2); text-align: center;
+}
+.nav button .ic { width: 22px; height: 22px; }
+.nav button[aria-current="page"] { color: var(--accent); }
+/* Windows: the selected tab keeps its accent bar, along the bottom (like Windows' own tab strips). */
+.nav button[aria-current="page"]::before { left: 34px; right: 34px; top: auto; bottom: 0; width: auto; height: 3px; border-radius: 2px; }
+:root[data-os="mac"] .nav button { width: 80px; height: 52px; font-size: 11px; gap: 3px; }
+:root[data-os="mac"] .nav button[aria-current="page"]::before { display: none; }
+.main { padding: 20px 32px 40px; }
+h1 { display: none; }
+section { max-width: 820px; margin: 0 auto; gap: 8px; }
+:root[data-os="mac"] section { max-width: 760px; }
+@media (max-width: 900px) { .nav { width: auto; } }
