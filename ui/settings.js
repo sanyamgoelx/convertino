@@ -594,6 +594,15 @@ $("show-activity").addEventListener("click", () => invoke("show_activity").catch
 const openLink = (url) => invoke("open_link", { url }).catch((e) => toast(String(e)));
 $("sponsor").addEventListener("click", () => openLink("https://github.com/sponsors/sanyamgoelx"));
 $("open-repo").addEventListener("click", () => openLink("https://github.com/sanyamgoelx/convertino"));
+$("upi").addEventListener("click", () => $("upi-dialog").showModal());
+$("upi-close").addEventListener("click", () => $("upi-dialog").close());
+$("upi-copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("upi-id").textContent);
+    $("upi-copy").textContent = "Copied";
+    setTimeout(() => { $("upi-copy").textContent = "Copy"; }, 1500);
+  } catch (e) { toast("Couldn't copy; select the ID and copy it instead."); }
+});
 
 // Updates (Settings > About).
 let update = null;

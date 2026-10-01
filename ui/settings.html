@@ -165,7 +165,10 @@
           <div class="big">Support Convertino</div>
           <div class="sub">Convertino is free and always will be. If it saves you time, you can chip in for its development. Entirely optional; nothing changes either way.</div>
         </div>
-        <button type="button" class="btn primary" id="sponsor">Sponsor on GitHub</button>
+        <div class="support-buttons">
+          <button type="button" class="btn primary" id="sponsor">Sponsor on GitHub</button>
+          <button type="button" class="btn" id="upi">Pay with UPI</button>
+        </div>
       </div>
       <div class="card list">
         <div class="item"><span class="grow">Open-source parts and their licences</span><button type="button" class="btn" id="show-licences">View</button></div>
@@ -185,6 +188,20 @@
     <tbody id="licence-rows"></tbody>
   </table>
   <div class="buttons end"><button type="button" class="btn primary" id="licences-close">Close</button></div>
+</dialog>
+
+<dialog id="upi-dialog" aria-labelledby="upi-title">
+  <h2 id="upi-title">Support with UPI</h2>
+  <p class="sub">Scan with any UPI app (Google Pay, PhonePe, Paytm, your bank's app) and choose any amount. Thank you!</p>
+  <div class="upi-body">
+    <img src="upi-qr.svg" width="200" height="200" alt="UPI QR code for sanyamgoel.pc@okicici">
+    <div class="upi-id">
+      <span class="sub">UPI ID</span>
+      <span class="field" id="upi-id">sanyamgoel.pc@okicici</span>
+      <button type="button" class="btn" id="upi-copy">Copy</button>
+    </div>
+  </div>
+  <div class="buttons end"><button type="button" class="btn primary" id="upi-close">Close</button></div>
 </dialog>
 
 <script src="settings.js"></script>

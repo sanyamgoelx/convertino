@@ -350,3 +350,10 @@ section { max-width: 820px; margin: 0 auto; gap: 8px; }
 .card.support .heart { width: 28px; height: 28px; color: #d1344f; fill: color-mix(in srgb, #d1344f 18%, transparent); }
 :root[data-os="mac"] .card.support .heart { display: block; }
 .card.support .sub { margin-top: 2px; line-height: 1.4; }
+.support-buttons { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.support-buttons .btn { width: 100%; }
+.upi-body { display: flex; align-items: center; gap: 22px; margin: 14px 0 6px; }
+.upi-body img { border-radius: 8px; background: #ffffff; padding: 8px; flex: none; }
+.upi-id { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.upi-id .field { min-width: 0; user-select: all; }
+@media (max-width: 600px) { .upi-body { flex-direction: column; } }

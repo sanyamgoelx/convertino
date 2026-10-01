@@ -19,7 +19,8 @@ two permissions macOS needs. Open/Save dialogs come next.
 ## Support
 
 Convertino is free. If it saves you time, you can support its development through
-**[GitHub Sponsors](https://github.com/sponsors/sanyamgoelx)** (also in Settings › About).
+**[GitHub Sponsors](https://github.com/sponsors/sanyamgoelx)** or, in India, UPI to
+`sanyamgoel.pc@okicici` (both also in Settings › About).
 
 ## Download
 
