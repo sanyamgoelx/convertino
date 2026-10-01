@@ -10,8 +10,8 @@ with a progress ring at the pointer and Undo. "Edit" on the PDF wheel opens an e
 rearrange, rotate, delete and add pages, and mark up (text, highlight, draw, signature,
 pictures, form filling), saved as a copy. Settings (click the tray icon) holds the shortcut,
 the wheel's order, quality, and the converters, which download the first time they're needed.
-Shift+click a format on the wheel to set options for one conversion. The Mac port and
-Open/Save dialogs come next.
+Shift+click a format on the wheel to set options for one conversion. On a Mac, Option-right-click opens the wheel; Settings walks you through the
+two permissions macOS needs. Open/Save dialogs come next.
 
 - [Build plan](docs/BUILD-PLAN.md)
 - [Interactive wheel mockup](docs/wheel-mockup.html) (download and open in a browser)
@@ -55,21 +55,34 @@ The first build takes a few minutes while Rust compiles everything; later runs a
 
 ## Builds for Mac (and Windows) without a Mac
 
-Push this folder to a **public** GitHub repository. The workflow builds a Windows
-installer and a universal Mac `.dmg` on every push, for free. Download them from
-the run's **Artifacts** section.
+Every push to GitHub builds a Windows installer and two Mac `.dmg`s (Apple silicon
+and Intel) for free; download them from the run's **Artifacts** section under
+**Actions**. On Windows, double-click **`publish-github.cmd`** to push (the first
+time it installs the GitHub CLI and asks you to sign in in the browser).
+**`ci-log.cmd`** saves the logs of a failed build to `ci.log`.
 
-The workflow file ships as `ci/build.yml`. Before your first push, move it to
-`.github/workflows/build.yml` (GitHub only runs workflows from there). In a
-terminal in this folder:
+The Mac builds carry ImageMagick, Poppler and Ghostscript inside the app
+(`ci/bundle-mac-tools.sh` makes them self-contained from Homebrew's builds), and
+download FFmpeg, Pandoc, 7-Zip and LibreOffice the first time they're needed.
+The Mac jobs then run the tests with real conversions.
 
-```
-mkdir .github\workflows
-move ci\build.yml .github\workflows\build.yml
-```
+### Installing on a Mac (for friends)
 
-Mac builds aren't notarized, so the first time a friend opens one, macOS blocks it.
-They open **System Settings > Privacy & Security** and click **Open Anyway**, once.
+1. Open the `.dmg` for your Mac (Apple menu > About This Mac: "Apple M…" chip =
+   Apple silicon, "Intel" = Intel) and drag Convertino to Applications.
+2. Open it. macOS says it can't check the app: open **System Settings > Privacy &
+   Security**, scroll down and click **Open Anyway** (once; it's free software
+   without a paid Apple certificate).
+3. Convertino's Settings opens at **Permissions**:
+   - **Accessibility**: click *Open System Settings* and turn Convertino on. This is
+     what makes Option-right-click work.
+   - **Finder**: click *Allow* and then **OK**, so Convertino can see your selection.
+4. Select files in Finder and press **⌃⌥⇧C**, or Option-right-click a file.
+
+After an update, macOS may ask for Accessibility again (the app's signature changes).
+
+Needs macOS 14 or later on Apple silicon, macOS 15 or later on Intel (the bundled
+converters come from Homebrew builds for those versions).
 
 ## Project layout
 
@@ -82,7 +95,9 @@ src-tauri/src/convert.rs    conversion plans (+ video.rs, data.rs, archive.rs)
 src-tauri/src/selection/
   win.rs               reads the Explorer / desktop selection (Shell COM)
   mac.rs               reads the Finder selection (Apple Events)
-.github/workflows/     free CI builds for Windows and macOS (from ci/build.yml)
+src-tauri/src/mac.rs   Option-right-click (event tap) and the Mac permissions
+ci/bundle-mac-tools.sh makes the Mac converters self-contained for the .dmg
+.github/workflows/     free CI builds for Windows and macOS, Mac tests
 ```
 
 ## Third-party code

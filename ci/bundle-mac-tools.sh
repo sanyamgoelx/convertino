@@ -89,7 +89,7 @@ POP="$(brew --prefix poppler)"
 progs=()
 for p in pdftoppm pdftotext pdfseparate pdfunite; do copy "$POP/bin/$p" "$PO/bin"; progs+=("$PO/bin/$p"); done
 relocate "$PO/lib" @executable_path/../lib "${progs[@]}"
-if [ -d "$BREW/share/poppler" ]; then mkdir -p "$PO/share"; cp -R "$BREW/share/poppler" "$PO/share/"; fi
+if [ -d "$BREW/share/poppler/" ]; then mkdir -p "$PO/share/poppler"; cp -RL "$BREW/share/poppler/." "$PO/share/poppler/"; fi
 fonts_conf "$PO"
 touch "$PO/.bundled"
 
@@ -99,9 +99,17 @@ GSP="$(brew --prefix ghostscript)"
 copy "$GSP/bin/gs" "$GS/bin"
 relocate "$GS/lib" @executable_path/../lib "$GS/bin/gs"
 mkdir -p "$GS/share"
-cp -R "$GSP/share/ghostscript" "$GS/share/"
+mkdir -p "$GS/share/ghostscript"
+cp -RL "$GSP/share/ghostscript/." "$GS/share/ghostscript/"
 fonts_conf "$GS"
 touch "$GS/.bundled"
+
+# Links would break once copied into the app: no symlinks at all.
+find "$OUT" -type l -print0 | while IFS= read -r -d '' l; do
+  target="$(cd "$(dirname "$l")" && realpath "$(readlink "$l")" 2>/dev/null || true)"
+  rm "$l"
+  if [ -n "$target" ] && [ -e "$target" ]; then cp -RL "$target" "$l"; else echo "dropped broken link $l"; fi
+done
 
 # ---------- sign, and check that nothing still points into Homebrew ----------
 chmod -R u+w "$OUT"
