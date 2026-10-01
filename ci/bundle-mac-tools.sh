@@ -45,7 +45,11 @@ relocate() {
   local lib="$1" rp="$2"; shift 2
   local args=()
   for f in "$@"; do args+=(-x "$f"); done
-  dylibbundler -of -cd -b "${args[@]}" -d "$lib" -p @rpath/ -s "$BREW/lib" >/dev/null
+  local search=(-s "$BREW/lib")
+  for d in "$BREW"/opt/*/lib; do search+=(-s "$d"); done
+  # stdin closed: dylibbundler asks on the terminal when it can't find a library; fail instead.
+  dylibbundler -of -cd -b "${args[@]}" -d "$lib" -p @rpath/ "${search[@]}" </dev/null >/tmp/dylibbundler.log 2>&1 \
+    || { tail -40 /tmp/dylibbundler.log; echo "::error::dylibbundler failed for $lib"; exit 1; }
   for f in "$@"; do install_name_tool -add_rpath "$rp" "$f" 2>/dev/null || true; done
   for d in "$lib"/*.dylib; do
     [ -e "$d" ] || continue

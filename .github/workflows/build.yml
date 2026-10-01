@@ -52,7 +52,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           sw_vers
-          ci/bundle-mac-tools.sh src-tauri/mac-tools
+          bash ci/bundle-mac-tools.sh src-tauri/mac-tools
 
       - name: Build app and installers (Windows)
         if: runner.os == 'Windows'
