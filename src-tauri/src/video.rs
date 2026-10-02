@@ -39,6 +39,8 @@ pub struct Probe {
     pub duration: Option<f64>,
     /// The audio stream's bitrate, when FFmpeg reports it.
     pub audio_kbps: Option<u32>,
+    /// Frames per second of the video stream.
+    pub fps: Option<f64>,
 }
 
 /// Choices from Settings (or Shift+click on the wheel) for one video job.
@@ -106,6 +108,7 @@ fn parse_probe(text: &str) -> Probe {
                 continue;
             }
             p.video = rest.split([' ', ',']).next().map(str::to_string);
+            p.fps = rest.split(',').map(str::trim).find_map(|part| part.strip_suffix(" fps").and_then(|n| n.trim().parse().ok()));
             for token in rest.split([' ', ',']) {
                 if let Some((w, h)) = token.split_once('x') {
                     if let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>()) {
@@ -764,6 +767,153 @@ fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>
     let source_bytes = input.metadata().map(|m| m.len()).unwrap_or(0) as f64;
     let ratio = if duration > 0.0 && source_bytes > 0.0 { chosen.bytes as f64 / (source_bytes * sampled.min(duration) / duration) } else { 0.0 };
     Ok(Some((Tuned { encoder: chosen.encoder, value: chosen.value }, ratio)))
+}
+
+// ---------------------------------------------------------------------------
+// Compress to a size (see size.rs for how the size is shared out).
+
+/// A screen recording: named like one, or mostly still between frames (a
+/// few seconds from the middle, with near-identical frames dropped).
+pub fn looks_like_screen(input: &Path, p: &Probe) -> bool {
+    let name = input.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    const NAMES: [&str; 7] = ["screen recording", "screen record", "screenrecording", "screen_recording", "screencast", "screen capture", "bildschirmaufnahme"];
+    if NAMES.iter().any(|k| name.contains(k)) {
+        return true;
+    }
+    let Some(ff) = tools::find(Tool::Ffmpeg) else { return false };
+    let d = p.duration.unwrap_or(0.0);
+    let (start, len) = if d > 10.0 { (d / 2.0 - 2.0, 4.0) } else { (0.0, d.clamp(0.5, 4.0)) };
+    let mut cmd = tools::command(&ff);
+    cmd.args(["-hide_banner", "-nostdin", "-ss", &format!("{start:.2}"), "-t", &format!("{len:.2}"), "-i"])
+        .arg(input)
+        .args(["-map", "0:v:0", "-an", "-vf", "scale=480:-2,mpdecimate", "-f", "null", "-"]);
+    let Ok(out) = crate::procs::output(&mut cmd, "FFmpeg", Some(std::time::Duration::from_secs(60))) else { return false };
+    let text = String::from_utf8_lossy(&out.stderr);
+    let kept = last_frame_count(&text);
+    let expected = p.fps.unwrap_or(30.0) * len;
+    let still = kept.map(|k| (k as f64) < expected * 0.45).unwrap_or(false);
+    log::info!("video {}: {kept:?} of about {expected:.0} frames change{}", input.display(), if still { " → screen recording" } else { "" });
+    still
+}
+
+/// The last "frame=  123" in FFmpeg's statistics.
+fn last_frame_count(text: &str) -> Option<u64> {
+    let rest = text.rsplit("frame=").next().filter(|_| text.contains("frame="))?;
+    rest.split_whitespace().next()?.parse().ok()
+}
+
+/// Encoder settings for an average bitrate (`kbps`), peaks capped.
+fn bitrate_args(enc: &str, kbps: u32) -> Vec<String> {
+    let (b, max, buf) = (format!("{kbps}k"), format!("{}k", kbps * 3 / 2), format!("{}k", kbps * 2));
+    let mut a = s(&["-c:v", enc]);
+    match enc {
+        "h264_nvenc" | "hevc_nvenc" => a.extend(s(&["-preset", "p5", "-tune", "hq", "-rc", "vbr", "-multipass", "fullres", "-spatial-aq", "1"])),
+        "h264_qsv" | "hevc_qsv" => a.extend(s(&["-preset", "medium"])),
+        "h264_amf" | "hevc_amf" => a.extend(s(&["-quality", "balanced", "-rc", "vbr_peak"])),
+        "libx264" | "libx265" => a.extend(s(&["-preset", "medium"])),
+        _ => {}
+    }
+    a.extend(s(&["-b:v", &b, "-maxrate", &max, "-bufsize", &buf, "-pix_fmt", if enc.ends_with("_qsv") { "nv12" } else { "yuv420p" }]));
+    a
+}
+
+/// Encodes `input` to fit `target` bytes as `plan` says: the usual
+/// look-the-same Compress when the size is generous (and the samples agree),
+/// otherwise H.265 at the plan's bitrate, size and frame rate (two passes
+/// with x265, so the size comes out right).
+#[allow(clippy::too_many_arguments)]
+pub fn run_to_size(
+    input: &Path,
+    info: &crate::size::Info,
+    plan: &crate::size::VideoPlan,
+    target: u64,
+    trim: Option<f64>,
+    output: &Path,
+    progress: &mut dyn FnMut(f64),
+) -> Result<(), String> {
+    let p = probe(input)?;
+    if p.video.is_none() {
+        return Err("This file has no video in it.".into());
+    }
+    let mut share = 0.0;
+    if plan.quality_mode {
+        let opts = Opts::from_quality(&crate::settings::get().quality);
+        share = 0.2;
+        match tune(input, &p, Codec::Hevc, opts.quality, None, &mut |f| progress(f * 0.2)) {
+            Ok(Some((t, ratio))) if ratio * info.bytes as f64 <= target as f64 * 0.9 => {
+                log::info!("video size: {} at {} fits ({:.0}% of the source)", t.encoder, t.value, ratio * 100.0);
+                let mut args = args_with(Job::Compress, &p, &opts, Some(&t))?;
+                // Never above the size's bitrate, even in a busy scene.
+                let pos = args.iter().position(|a| a == "-movflags").unwrap_or(args.len());
+                let cap = s(&["-maxrate", &format!("{}k", plan.video_kbps), "-bufsize", &format!("{}k", plan.video_kbps * 2)]);
+                args.splice(pos..pos, cap);
+                return run_ffmpeg(input, &args, output, &mut |f| progress(0.2 + 0.8 * f));
+            }
+            Ok(_) => log::info!("video size: the look-the-same setting wouldn't fit {target} bytes; using a bitrate"),
+            Err(e) if e == crate::procs::CANCELLED => return Err(e),
+            Err(e) => log::warn!("video size: look search failed ({e}); using a bitrate"),
+        }
+    }
+
+    let hevc = working(Codec::Hevc);
+    let hardware = hevc.iter().copied().find(|e| !is_software(e));
+    let work = plan.width as f64 * plan.height as f64 * plan.fps * plan.seconds;
+    // x265 in two passes hits the size best; a long or huge video goes to the graphics card.
+    let enc: &str = if hevc.contains(&"libx265") && (hardware.is_none() || work <= 1920.0 * 1080.0 * 30.0 * 240.0) {
+        "libx265"
+    } else if let Some(hw) = hardware {
+        hw
+    } else if let Some(e) = hevc.first() {
+        e
+    } else {
+        encoder(Codec::H264).ok_or("This FFmpeg has no working H.264 encoder.")?
+    };
+    let mut base = s(&["-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "0"]);
+    if let Some(t) = trim {
+        base.extend(s(&["-t", &format!("{t:.2}")]));
+    }
+    let mut vf = Vec::new();
+    if plan.height != p.height || plan.width != p.width {
+        vf.push(format!("scale={}:{}:flags=lanczos", plan.width, plan.height));
+    }
+    if plan.fps + 0.5 < p.fps.unwrap_or(plan.fps) {
+        vf.push(format!("fps={}", plan.fps));
+    }
+    if !vf.is_empty() {
+        base.extend(s(&["-vf", &vf.join(",")]));
+    }
+    let hevc_tag = enc.starts_with("hevc") || enc == "libx265";
+    let mut audio = match (p.audio.as_deref(), p.audio_kbps) {
+        (None, _) => s(&["-an"]),
+        _ if plan.audio_kbps == 0 => s(&["-an"]),
+        (Some("aac"), Some(k)) if k <= plan.audio_kbps && !plan.mono => s(&["-c:a", "copy"]),
+        _ => s(&["-c:a", "aac", "-b:a", &format!("{}k", plan.audio_kbps)]),
+    };
+    if plan.mono && audio.iter().any(|a| a == "aac") {
+        audio.extend(s(&["-ac", "1"]));
+    }
+    let mut tail = audio;
+    if hevc_tag {
+        tail.extend(s(&["-tag:v", "hvc1"]));
+    }
+    tail.extend(s(&["-movflags", "+faststart"]));
+    log::info!("video size: {enc} {} kbps, {}x{} at {} fps, audio {} kbps -> {target} bytes", plan.video_kbps, plan.width, plan.height, plan.fps, plan.audio_kbps);
+
+    if enc == "libx265" {
+        // Two passes: the first measures the whole video, the second spends the bits where they're needed.
+        let tmp = crate::convert::TempDir::new("x265")?;
+        let rate = format!("{}k", plan.video_kbps);
+        let x265 = |pass: u32| {
+            s(&["-c:v", "libx265", "-preset", "medium", "-b:v", &rate, "-pix_fmt", "yuv420p", "-x265-params", &format!("pass={pass}:stats=x265.log:log-level=error")])
+        };
+        let first = [base.clone(), x265(1), s(&["-an", "-f", "null"])].concat();
+        let mid = share + (1.0 - share) * 0.4;
+        crate::convert::run_ffmpeg_in(Some(&tmp.0), input, &first, Path::new("-"), &mut |f| progress(share + (mid - share) * f))?;
+        let second = [base, x265(2), tail].concat();
+        return crate::convert::run_ffmpeg_in(Some(&tmp.0), input, &second, output, &mut |f| progress(mid + (1.0 - mid) * f));
+    }
+    let args = [base, bitrate_args(enc, plan.video_kbps), tail].concat();
+    run_ffmpeg(input, &args, output, &mut |f| progress(share + (1.0 - share) * f))
 }
 
 /// Runs a video job from `input` to `output` (for Frames, a folder).

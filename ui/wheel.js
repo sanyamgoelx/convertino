@@ -42,6 +42,7 @@ const ringProg = document.getElementById("ring-prog");
 const ringIn = document.getElementById("ring-in");
 const ringText = document.getElementById("ring-text");
 const ringUndo = document.getElementById("ring-undo");
+const ringCompare = document.getElementById("ring-compare");
 const RING_C = 2 * Math.PI * 32;     // circumference of the ring's arc
 const HANDOFF_MS = 2000;             // default; Settings can change it (model.handoffMs)
 const tauri = window.__TAURI__;
@@ -82,21 +83,24 @@ function draw() {
     .map((s, i) => {
       const a = ((-90 + i * step) * Math.PI) / 180;
       const x = (R + rm * Math.cos(a)).toFixed(1), y = (R + rm * Math.sin(a)).toFixed(1);
-      return `<div class="slot" role="menuitem" data-i="${i}" style="left:${x}px;top:${y}px;transition-delay:${i * 14}ms">` +
+      return `<div class="slot${s.icon ? "" : " sized"}" role="menuitem" data-i="${i}" style="left:${x}px;top:${y}px;transition-delay:${i * 14}ms">` +
         (s.tag ? `<span class="tag">${esc(s.tag)}</span>` : "") +
-        icon(s.icon) + `<span class="lbl">${esc(s.label)}</span>` +
-        (i < 9 && !s.tag ? `<span class="key">${i + 1}</span>` : "") + `</div>`;
+        (s.icon ? icon(s.icon) : "") + `<span class="lbl">${esc(s.label)}</span>` +
+        (s.sub ? `<span class="sub">${esc(s.sub)}</span>` : "") +
+        (i < 9 && !s.tag && !size ? `<span class="key">${i + 1}</span>` : "") + `</div>`;
     })
     .join("");
-  const hub = `<div class="hub">${fileTile(model.hubColor)}<div class="hn" title="${esc(model.hubTitle)}">${esc(model.hubTitle)}</div><div class="hm">${esc(model.hubSubtitle)}</div></div>`;
+  const hub = size ? sizeHub() : `<div class="hub">${fileTile(model.hubColor)}<div class="hn" title="${esc(model.hubTitle)}">${esc(model.hubTitle)}</div><div class="hm">${esc(model.hubSubtitle)}</div></div>`;
   wheelEl.innerHTML = `<svg viewBox="0 0 ${D} ${D}" aria-hidden="true">${segs}</svg>${labels}${hub}`;
-  setActive(-1);
+  if (size) wireSizeHub();
+  setActive(size && size.custom ? slots.length - 1 : -1);
 }
 
 function setActive(i) {
   active = i;
   wheelEl.querySelectorAll("[data-i]").forEach((el) => el.classList.toggle("on", Number(el.dataset.i) === i));
   const s = slots[i];
+  if (size) return sizeHint(s);
   if (!s) {
     const skipped = model && model.skipped.length ? ` · ${model.skipped.length} item${model.skipped.length > 1 ? "s" : ""} skipped` : "";
     hintEl.innerHTML = `<span class="hs">Point at a format${skipped}</span><span class="hk">1–${Math.min(9, slots.length)} to pick · arrows to move · Esc to cancel</span>`;
@@ -124,6 +128,7 @@ function open(m) {
   document.documentElement.dataset.os = m.os;
   if (m.accent) document.documentElement.style.setProperty("--accent", m.accent);
   page = "main";
+  size = null;
   slots = m.main;
   wheelEl.classList.remove("open", "closing");
   hintEl.classList.remove("show");
@@ -149,6 +154,7 @@ function close() {
 }
 
 function showPage(p) {
+  size = null;
   page = p;
   slots = p === "more" ? model.more : model.main;
   draw();
@@ -161,15 +167,21 @@ function choose(i, withOptions = false) {
   if (!s) return;
   if (s.kind === "more") return showPage("more");
   if (s.kind === "back") return showPage("main");
+  if (s.kind === "size") return startSize(s.bytes, s.label, null);
+  if (s.kind === "custom") return openCustom("");
+  if (s.kind === "target" && COMPRESS.has(s.id)) return enterSize(s);
   if (withOptions && OPTIONS[s.id]) return showOptions(s);
   start(s, null, false);
 }
 
 function start(s, quality, remember) {
-  const args = { targetId: s.id, label: s.label, family: s.family, quality, remember };
+  launch(s, { targetId: s.id, label: s.label, family: s.family, quality, remember, size: null });
+}
+
+function launch(s, args) {
   // Edit opens the PDF editor window instead of converting; with the ring
   // turned off in Settings, progress goes straight to the corner card.
-  if (s.id === "pdf.edit" || (model && model.ring === false)) {
+  if (args.targetId === "pdf.edit" || (model && model.ring === false)) {
     return animateOut(() => tauri && tauri.core.invoke("wheel_pick", args));
   }
   pick(s, args);
@@ -196,10 +208,9 @@ const OPTIONS = {
   "image.jpg": ["image", "jpg", "convertMax"], "image.webp": ["image", "webp", "convertMax"],
   "image.png": ["convertMax"], "image.avif": ["image", "convertMax"], "image.tiff": ["convertMax"],
   "image.bmp": ["convertMax"], "image.gif": ["convertMax"], "image.pdf": ["convertMax"],
-  "image.resize": ["resize"],
-  "pdf.jpg": ["dpi", "image", "jpg"], "pdf.png": ["dpi"], "pdf.webp": ["dpi", "image", "webp"], "pdf.compress": ["pdfCompress"],
+  "pdf.jpg": ["dpi", "image", "jpg"], "pdf.png": ["dpi"], "pdf.webp": ["dpi", "image", "webp"],
   "audio.mp3": ["mp3"], "video.mp3": ["mp3"],
-  "video.mp4": ["video"], "video.mov": ["video"], "video.720p": ["video"], "video.webm": ["video"], "video.compress": ["video"],
+  "video.mp4": ["video"], "video.mov": ["video"], "video.720p": ["video"], "video.webm": ["video"],
   "video.gif": ["gifWidth", "gifSeconds"],
 };
 const DEFAULT_Q = { jpg: 90, webp: 85, resize: 1920, convertMax: 0, dpi: 150, pdfCompress: "balanced", mp3: 320, video: "balanced", gifWidth: 480, gifSeconds: 30, image: "balanced" };
@@ -264,6 +275,277 @@ if (optsEl) {
   });
 }
 
+// ---------- compress to a size ----------
+// Compress turns the wheel into a ring of sizes picked for the file(s); each
+// says what it will cost. "Custom…", or just typing a number, turns the centre
+// into a size box with a live preview under the wheel.
+
+const COMPRESS = new Set(["image.compress", "video.compress", "pdf.compress", "audio.compress"]);
+let size = null;   // { slot, together, ring, custom, text, unit, preview, previewFor, loading, error }
+
+function words(bytes) {
+  if (bytes >= 1e9) return `${+(bytes / 1e9).toFixed(2)} GB`;
+  if (bytes >= 10e6) return `${Math.round(bytes / 1e6)} MB`;
+  if (bytes >= 1e6) return `${+(bytes / 1e6).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+}
+
+function enterSize(s) {
+  size = { slot: s, together: true, ring: null, custom: false, text: "", unit: "MB", preview: null, previewFor: "", loading: true, error: null };
+  slots = [];
+  draw();
+  loadPresets();
+}
+
+function loadPresets() {
+  if (!size) return;
+  const mine = size;
+  mine.loading = true;
+  if (!tauri) return demoPresets(mine);
+  tauri.core.invoke("compress_presets", { targetId: mine.slot.id, family: mine.slot.family, together: mine.together })
+    .then((r) => { if (size === mine) { mine.ring = r; mine.loading = false; mine.unit = defaultUnit(r); showSizes(); } })
+    .catch((e) => { if (size === mine) { mine.loading = false; mine.error = String(e); showSizes(); } });
+}
+
+function defaultUnit(r) {
+  return r && r.total < 2e6 ? "KB" : "MB";
+}
+
+function showSizes() {
+  const r = size.ring;
+  slots = (r ? r.presets : []).map((p) => ({
+    kind: "size", id: size.slot.id, family: size.slot.family, icon: null, bytes: p.bytes, preview: p.preview,
+    label: p.label, sub: p.name ? `${p.name} · ${p.preview.short}` : p.preview.short, tag: null, count: 1, hint: "",
+  }));
+  slots.push({ kind: "custom", id: size.slot.id, family: size.slot.family, icon: null, label: "Custom…", sub: "Any size", tag: null, count: 1, hint: "" });
+  draw();
+}
+
+const multi = () => size && size.ring && size.ring.count > 1;
+const scope = () => (multi() ? (size.together ? "All together under " : "Each under ") : "Under ");
+
+function toggleHtml() {
+  if (!multi()) return "";
+  const b = (v, label) => `<button type="button" class="seg-btn${size.together === v ? " on" : ""}" data-together="${v}" aria-pressed="${size.together === v}">${label}</button>`;
+  return `<div class="seg-toggle" role="group" aria-label="The size is for">${b(false, "Each")}${b(true, "Together")}</div>`;
+}
+
+function sizeHub() {
+  if (size.loading) {
+    return `<div class="hub size-hub">${fileTile(model.hubColor, 22)}<div class="hm">Measuring…</div></div>`;
+  }
+  const title = (size.ring && size.ring.title) || model.hubTitle;
+  if (!size.custom) {
+    return `<div class="hub size-hub"><div class="hm">Compress to</div><div class="hn" title="${esc(title)}">${esc(title)}</div>${toggleHtml()}` +
+      `<button type="button" class="hub-btn" data-act="back">Back</button></div>`;
+  }
+  const p = size.preview && size.previewFor === typedKey() ? size.preview : null;
+  const go = !p ? "Compress" : p.fits ? "OK" : p.ok ? "Compress" : `Make ${words(p.min)}`;
+  return `<form class="hub size-hub custom" autocomplete="off">` +
+    (multi() ? toggleHtml() : `<label class="hm" for="size-box">No bigger than</label>`) +
+    `<div class="size-row"><input id="size-box" type="text" inputmode="decimal" aria-label="Size" value="${esc(size.text)}" spellcheck="false">` +
+    `<button type="button" class="unit" data-act="unit" aria-label="Unit: ${size.unit}, click to switch">${size.unit}</button></div>` +
+    `<div class="size-row"><button type="button" class="hub-btn icon" data-act="close" aria-label="Back to the sizes">${icon("back", 14)}</button>` +
+    `<button type="submit" class="hub-btn primary"${typedBytes() ? "" : " disabled"}>${go}</button></div></form>`;
+}
+
+function wireSizeHub() {
+  const hub = wheelEl.querySelector(".hub");
+  if (!hub) return;
+  hub.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-act], [data-together]");
+    if (!t) return;
+    e.stopPropagation();
+    if (t.dataset.together) {
+      const v = t.dataset.together === "true";
+      if (size.together !== v) { size.together = v; size.preview = null; size.previewFor = ""; loadPresets(); if (size.custom) refreshPreview(); }
+      return;
+    }
+    if (t.dataset.act === "back") return leaveSize();
+    if (t.dataset.act === "close") return closeCustom();
+    if (t.dataset.act === "unit") { size.unit = size.unit === "MB" ? "KB" : "MB"; redrawCustom(); return refreshPreview(); }
+  });
+  const form = hub.tagName === "FORM" ? hub : null;
+  if (!form) return;
+  form.addEventListener("submit", (e) => { e.preventDefault(); submitCustom(); });
+  const box = form.querySelector("#size-box");
+  box.addEventListener("input", () => {
+    const clean = box.value.replace(",", ".").replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+    if (clean !== box.value) box.value = clean;
+    size.text = clean;
+    refreshPreview();
+  });
+  box.addEventListener("keydown", (e) => {
+    // "k" and "m" pick the unit while typing.
+    const k = e.key.toLowerCase();
+    if (k === "k" || k === "m") { e.preventDefault(); size.unit = k === "k" ? "KB" : "MB"; redrawCustom(); refreshPreview(); }
+  });
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+}
+
+/// Redraws just the centre (keeps the ring and the hover).
+function redrawCustom() {
+  const hub = wheelEl.querySelector(".hub");
+  if (!hub) return;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = sizeHub();
+  hub.replaceWith(tmp.firstChild);
+  wireSizeHub();
+}
+
+function typedBytes() {
+  const n = parseFloat(size.text);
+  return n > 0 ? Math.round(n * (size.unit === "KB" ? 1e3 : 1e6)) : 0;
+}
+const typedKey = () => `${typedBytes()}|${size.together}`;
+
+let previewTimer = 0;
+function refreshPreview() {
+  clearTimeout(previewTimer);
+  const bytes = typedBytes();
+  if (!bytes) { size.preview = null; size.previewFor = ""; redrawCustomButton(); return sizeHint(null); }
+  const key = typedKey();
+  const mine = size;
+  previewTimer = setTimeout(() => {
+    const got = (p) => {
+      if (size !== mine || typedKey() !== key) return;
+      mine.preview = p;
+      mine.previewFor = key;
+      redrawCustomButton();
+      if (active < 0 || active === slots.length - 1) sizeHint(null);
+    };
+    if (!tauri) return got(demoPreview(bytes));
+    tauri.core.invoke("compress_preview", { targetId: mine.slot.id, family: mine.slot.family, bytes, together: mine.together, trim: null })
+      .then(got).catch(() => {});
+  }, 120);
+}
+
+function redrawCustomButton() {
+  const btn = wheelEl.querySelector(".size-hub .primary");
+  if (!btn) return;
+  const p = size.preview && size.previewFor === typedKey() ? size.preview : null;
+  btn.textContent = !p ? "Compress" : p.fits ? "OK" : p.ok ? "Compress" : `Make ${words(p.min)}`;
+  btn.disabled = !typedBytes();
+}
+
+function openCustom(first) {
+  if (!size || size.loading) return;
+  size.custom = true;
+  if (first !== null && first !== undefined) size.text = first;
+  draw();
+  refreshPreview();
+}
+
+function closeCustom() {
+  size.custom = false;
+  draw();
+}
+
+function leaveSize() {
+  size = null;
+  slots = page === "more" ? model.more : model.main;
+  draw();
+}
+
+function submitCustom() {
+  const bytes = typedBytes();
+  if (!bytes) return;
+  const p = size.preview && size.previewFor === typedKey() ? size.preview : null;
+  if (p && !p.fits && !p.ok) return startSize(p.min, words(p.min), null);
+  startSize(bytes, words(bytes), null);
+}
+
+function startSize(bytes, label, trim) {
+  if (!size || busy) return;
+  const s = size.slot;
+  launch({ label }, {
+    targetId: s.id, label, family: s.family, quality: null, remember: false,
+    size: { bytes, together: size.together && multi(), trim },
+  });
+}
+
+/// The hint under the wheel in size mode.
+function sizeHint(s) {
+  const keys = "Click to compress · type a number for any size · Esc goes back";
+  if (s && s.kind === "size") {
+    const p = s.preview;
+    const each = multi() && !size.together;
+    hintEl.innerHTML = `<span class="ht">${esc(scope() + s.label)}</span>` +
+      `<span class="hs">${esc(`${p.line1} · ${p.line2}`)} · ≈ ${esc(words(p.est))}${each ? " in all" : ""}</span><span class="hk">${keys}</span>`;
+    return;
+  }
+  if (size.loading) {
+    hintEl.innerHTML = `<span class="hs">Working out the sizes for ${esc(model.hubTitle)}…</span><span class="hk">Esc goes back</span>`;
+    return;
+  }
+  if (s && s.kind === "custom" && !size.custom) {
+    hintEl.innerHTML = `<span class="ht">Custom size</span><span class="hs">Type any size in the middle of the wheel</span><span class="hk">Or just start typing a number</span>`;
+    return;
+  }
+  if (size.custom) {
+    const bytes = typedBytes();
+    const p = size.preview && size.previewFor === typedKey() ? size.preview : null;
+    const enter = "Enter to compress · Esc goes back";
+    if (!bytes) {
+      hintEl.innerHTML = `<span class="ht">Type a size</span><span class="hs">Any number · K or M sets the unit</span><span class="hk">${enter}</span>`;
+    } else if (!p) {
+      hintEl.innerHTML = `<span class="ht">${esc(scope() + words(bytes))}</span><span class="hs">Working it out…</span><span class="hk">${enter}</span>`;
+    } else if (p.fits) {
+      hintEl.innerHTML = `<span class="ht">${esc(p.line1)}</span><span class="hs">${esc(p.line2)}</span><span class="hk">${enter}</span>`;
+    } else if (p.ok) {
+      hintEl.innerHTML = `<span class="ht">${esc(scope() + words(bytes))}</span><span class="hs">${esc(`${p.line1} · ${p.line2}`)} · ≈ ${esc(words(p.est))}</span><span class="hk">${enter}</span>`;
+    } else {
+      hintEl.innerHTML = `<span class="ht">${esc(p.line1)}</span><span class="hs">${esc(p.line2)}</span>` +
+        `<span class="hint-acts"><button type="button" class="hint-btn primary" data-act="min">Make it ${esc(words(p.min))}</button>` +
+        (p.alt ? `<button type="button" class="hint-btn" data-act="alt">${esc(p.alt.label)}</button>` : "") + `</span>`;
+      const on = (a, f) => { const b = hintEl.querySelector(`[data-act="${a}"]`); if (b) b.addEventListener("click", (e) => { e.stopPropagation(); f(); }); };
+      on("min", () => startSize(p.min, words(p.min), null));
+      on("alt", () => startSize(p.alt.bytes, words(p.alt.bytes), p.alt.trim));
+    }
+    return;
+  }
+  const title = (size.ring && size.ring.title) || model.hubTitle;
+  const what = size.error ? size.error
+    : multi() ? (size.together ? `Sizes for all ${size.ring.count} together, or switch to each` : `Sizes for each of the ${size.ring.count}`)
+    : `Sizes picked for this ${words(size.ring ? size.ring.total : 0)} file`;
+  hintEl.innerHTML = `<span class="ht">Compress ${esc(title)}</span><span class="hs">${esc(what)}</span><span class="hk">${keys}</span>`;
+}
+
+/// Keys in size mode; true when handled.
+function sizeKey(e) {
+  const inBox = e.target && e.target.id === "size-box";
+  if (e.key === "Escape") {
+    e.preventDefault();
+    if (size.custom) closeCustom(); else leaveSize();
+    return true;
+  }
+  if (inBox) return true; // typing in the box
+  if (e.key === "Backspace" && !size.custom) { e.preventDefault(); leaveSize(); return true; }
+  if (/^[0-9.]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    if (!size.custom) openCustom(e.key);
+    return true;
+  }
+  return false;
+}
+
+// Opened in a browser: sample sizes so the ring can be checked.
+function demoPresets(mine) {
+  setTimeout(() => {
+    const mk = (bytes, name, short, line1) => ({ bytes, label: words(bytes), name, preview: { fits: false, ok: true, short, line1, line2: "Quality lowered to fit", est: bytes * 0.97, min: 4.5e6, alt: null } });
+    mine.ring = { title: "Trip.mp4", count: 1, total: 182e6, presets: [mk(60e6, "", "Full quality", "Keeps 1080p"), mk(30e6, "", "720p", "1080p → 720p"), mk(18e6, "Email", "720p", "1080p → 720p"), mk(15e6, "", "480p", "1080p → 480p"), mk(10e6, "Discord", "360p", "1080p → 360p")] };
+    mine.loading = false;
+    mine.unit = "MB";
+    if (size === mine) showSizes();
+  }, 400);
+}
+function demoPreview(bytes) {
+  if (bytes < 4.5e6) return { fits: false, ok: false, short: "Too small", line1: `Can't fit Trip.mp4 in ${words(bytes)}`, line2: "The smallest that still plays well is about 4.5 MB", est: bytes, min: 4.5e6, alt: { label: "Keep 720p, first 7 s", bytes, trim: 7 } };
+  if (bytes >= 182e6) return { fits: true, ok: true, short: "Already fits", line1: "Trip.mp4 is already 182 MB", line2: "Nothing to do", est: 182e6, min: 4.5e6, alt: null };
+  return { fits: false, ok: true, short: "480p", line1: "1080p → 480p", line2: "Quality lowered to fit", est: bytes * 0.97, min: 4.5e6, alt: null };
+}
+
 // ---------- progress ring ----------
 // After a pick the wheel collapses into a ring at the same spot. A job that
 // finishes within HANDOFF_MS ends there (tick, what was saved, Undo); a longer
@@ -311,6 +593,7 @@ function startRing(id, label, flip, pickedAt) {
   ringText.textContent = "";
   ringUndo.hidden = false;
   ringUndo.disabled = false;
+  ringCompare.hidden = true;
   requestAnimationFrame(() => requestAnimationFrame(() => ringEl.classList.add("show")));
   const handoffMs = (model && model.handoffMs) || HANDOFF_MS;
   ring.handoff = setTimeout(handOff, Math.max(0, handoffMs - (performance.now() - pickedAt)));
@@ -339,6 +622,8 @@ function ringDone(d) {
   // "holiday-goa.jpg · 2.8 MB" -> "Saved holiday-goa.jpg"
   ringText.textContent = "Saved " + String(d.body).split(" · ")[0];
   ringUndo.hidden = !d.canUndo;
+  ringCompare.hidden = !d.compare;
+  ringEl.classList.toggle("wide", !!d.compare);
   ringEl.classList.add("done");
   if (tauri) tauri.core.invoke("ring_interactive", { on: true });
   scheduleFade(1600);
@@ -388,6 +673,12 @@ function resetRing() {
 
 ringEl.addEventListener("mouseenter", () => ring && ring.done && clearTimeout(ring.fade));
 ringEl.addEventListener("mouseleave", () => ring && ring.done && scheduleFade(900));
+ringCompare.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!ring || !ring.done) return;
+  if (tauri) tauri.core.invoke("compare_open", { id: ring.id }).catch(() => {});
+  fadeRing();
+});
 ringUndo.addEventListener("click", async (e) => {
   e.stopPropagation();
   if (!ring || !ring.done) return;
@@ -416,7 +707,7 @@ function demoRing(s, collapse) {
       ringProgress({ fraction: f, detail: Math.round(f * 100) + "%" });
       if (f >= 1) {
         clearInterval(t);
-        ringDone({ ok: true, body: "Q3-report – pages · 3 images", canUndo: true });
+        ringDone({ ok: true, body: "Q3-report – pages · 3 images", canUndo: true, compare: !!s.bytes || s.label.endsWith("B") });
       }
     }, 90);
   });
@@ -433,6 +724,7 @@ function indexAt(x, y) {
 
 document.addEventListener("pointermove", (e) => {
   if (!model || busy || ring || optsFor) return;
+  if (size && e.target.closest && e.target.closest(".hub, .hint")) return;
   const i = indexAt(e.clientX, e.clientY);
   if (i !== active) setActive(i);
 });
@@ -441,6 +733,8 @@ document.addEventListener("click", (e) => {
   if (!model || busy || ring) return;
   // A click beside the options card closes just the card.
   if (optsFor) { hideOptions(); hintEl.classList.add("show"); return; }
+  // The size ring's centre and hint have their own buttons.
+  if (size && e.target.closest && e.target.closest(".hub, .hint")) return;
   const i = indexAt(e.clientX, e.clientY);
   if (i >= 0) choose(i, e.shiftKey);
   else close(); // the hub or empty space
@@ -450,6 +744,7 @@ document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 document.addEventListener("keydown", (e) => {
   if (!model || busy || ring || optsFor) return;
+  if (size && sizeKey(e)) return;
   const n = slots.length;
   if (e.key === "Escape") {
     e.preventDefault();

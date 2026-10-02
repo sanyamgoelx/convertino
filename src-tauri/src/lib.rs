@@ -11,6 +11,7 @@
 
 mod accent;
 mod archive;
+mod compare;
 mod convert;
 mod data;
 mod install;
@@ -19,6 +20,7 @@ mod look;
 mod procs;
 mod report;
 mod settings;
+mod size;
 mod tools;
 mod update;
 #[cfg(windows)]
@@ -66,8 +68,9 @@ const RING_CX: f64 = 56.0;
 const RING_CY: f64 = 60.0;
 
 /// HUD (progress and done cards) width and margin from the screen edge (logical px).
-const HUD_W: f64 = 380.0;
-const HUD_MARGIN: f64 = 12.0;
+/// Includes room for the cards' shadow (see hud.css), so the window sits at the screen's edge.
+const HUD_W: f64 = 408.0;
+const HUD_MARGIN: f64 = 0.0;
 
 /// Which hotkey is active, and which were taken by other apps.
 #[derive(Clone, Default, Serialize)]
@@ -153,6 +156,7 @@ fn wheel_pick(
     family: String,
     quality: Option<settings::Quality>,
     remember: Option<bool>,
+    size: Option<size::Ask>,
 ) -> u64 {
     settings::record_pick(&target_id);
     if target_id == "pdf.edit" {
@@ -193,13 +197,121 @@ fn wheel_pick(
     }
     let files = files.into_iter().map(std::path::PathBuf::from).collect();
     let pending = state.wheel.lock().ok().and_then(|w| w.as_ref().and_then(|m| m.pending_dialog));
-    let id = jobs::start(app, target_id, label, family, files, ring, quality.map(|q| q.clamped()), pending);
+    let id = jobs::start(app, target_id, label, family, files, ring, quality.map(|q| q.clamped()), pending, size);
     if ring {
         if let Ok(mut r) = state.ring.lock() {
             *r = Some(id);
         }
     }
     id
+}
+
+/// The open wheel's files a target works on.
+fn wheel_files(app: &AppHandle, target_id: &str, family: &str) -> Vec<PathBuf> {
+    app.state::<AppState>()
+        .wheel
+        .lock()
+        .ok()
+        .and_then(|w| w.clone())
+        .map(|m| {
+            m.files
+                .into_iter()
+                .filter(|f| f.family == family && wheel::target_applies(target_id, &f.ext))
+                .map(|f| PathBuf::from(f.path))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What the size ring shows for the wheel's files.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SizeRing {
+    title: String,
+    count: usize,
+    /// All the files together, in bytes.
+    total: u64,
+    presets: Vec<size::Preset>,
+}
+
+fn size_infos(app: &AppHandle, target_id: &str, family: &str) -> Result<(size::Kind, Vec<size::Info>), String> {
+    let kind = size::Kind::of_target(target_id).ok_or("This isn't a Compress slot.")?;
+    let files = wheel_files(app, target_id, family);
+    if files.is_empty() {
+        return Err("There's nothing to compress.".into());
+    }
+    let infos = files.iter().map(|f| size::quick_info(kind, f)).collect::<Result<Vec<_>, _>>()?;
+    Ok((kind, infos))
+}
+
+/// The sizes offered on the ring after Compress is picked (measuring a video takes a moment).
+#[tauri::command]
+async fn compress_presets(app: AppHandle, target_id: String, family: String, together: bool) -> Result<SizeRing, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (kind, infos) = size_infos(&app, &target_id, &family)?;
+        Ok(SizeRing {
+            title: size::title(kind, &infos),
+            count: infos.len(),
+            total: infos.iter().map(|i| i.bytes).sum(),
+            presets: size::presets(kind, &infos, together),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What a typed size would do (the centre of the size ring).
+#[tauri::command]
+async fn compress_preview(app: AppHandle, target_id: String, family: String, bytes: u64, together: bool, trim: Option<f64>) -> Result<size::Preview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (kind, infos) = size_infos(&app, &target_id, &family)?;
+        Ok(size::preview(kind, &infos, bytes, together, trim))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Opens the Compare window for a finished Compress job.
+#[tauri::command]
+fn compare_open(app: AppHandle, id: u64) -> Result<(), String> {
+    if jobs::compare_pairs(id).is_empty() {
+        return Err("There's nothing to compare.".into());
+    }
+    // Already open: show this job in it.
+    if let Some(w) = app.get_webview_window("compare") {
+        let _ = w.eval(&format!("location.hash = '{id}'; location.reload();"));
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let app = app.clone();
+    // Built off the calling thread: creating a window inside a command can deadlock on Windows.
+    std::thread::spawn(move || {
+        let built = WebviewWindowBuilder::new(&app, "compare", WebviewUrl::App(format!("compare.html#{id}").into()))
+            .title("Compare – Convertino")
+            .inner_size(1000.0, 760.0)
+            .min_inner_size(560.0, 420.0)
+            .center()
+            .focused(true)
+            .build();
+        if let Err(e) = built {
+            log::error!("couldn't open Compare: {e}");
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn compare_close(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("compare") {
+        let _ = w.close();
+    }
+}
+
+/// One original/result pair of a Compress job as pictures the window can show.
+#[tauri::command]
+async fn compare_data(id: u64, index: usize) -> Result<compare::Pair, String> {
+    tauri::async_runtime::spawn_blocking(move || compare::pair(id, index)).await.map_err(|e| e.to_string())?
 }
 
 /// After the wheel's collapse animation: shrink the window around the ring,
@@ -1202,6 +1314,11 @@ pub fn run() {
             wheel_model,
             wheel_pick,
             wheel_close,
+            compress_presets,
+            compress_preview,
+            compare_open,
+            compare_data,
+            compare_close,
             ring_mode,
             ring_interactive,
             ring_handoff,

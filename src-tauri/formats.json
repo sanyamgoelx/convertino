@@ -48,7 +48,7 @@
           "label": "Compress",
           "icon": "compress",
           "action": true,
-          "hint": "Smaller PDF for email · images at 150 DPI"
+          "hint": "Pick a file size · pictures shrink first"
         },
         {
           "id": "pdf.edit",
@@ -165,6 +165,13 @@
       ],
       "more": [
         {
+          "id": "audio.compress",
+          "label": "Compress",
+          "icon": "compress",
+          "action": true,
+          "hint": "Pick a file size · lowers the bitrate to fit"
+        },
+        {
           "id": "audio.aiff",
           "label": "AIFF",
           "icon": "audio",
@@ -245,11 +252,11 @@
           "hint": "16 to 256 px sizes in one icon"
         },
         {
-          "id": "image.resize",
-          "label": "Resize",
-          "icon": "resize",
+          "id": "image.compress",
+          "label": "Compress",
+          "icon": "compress",
           "action": true,
-          "hint": "Longest side 1920 px · same format"
+          "hint": "Pick a file size · lowers quality, then resolution"
         }
       ],
       "more": [
@@ -330,7 +337,7 @@
           "label": "Compress",
           "icon": "compress",
           "action": true,
-          "hint": "H.265 · about a third of the size"
+          "hint": "Pick a file size · or the smallest that looks the same"
         },
         {
           "id": "video.720p",

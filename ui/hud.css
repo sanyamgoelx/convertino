@@ -1,4 +1,5 @@
-/* HUD window: 380 px wide, height follows its cards, transparent. */
+/* HUD window: 408 px wide, height follows its cards, transparent. The
+   padding around the cards leaves room for their shadow (the window clips it). */
 :root {
   --ink: #1b1b1f;
   --ink-2: #5e6068;
@@ -11,7 +12,7 @@
   --accent: #005fb8;
   --bad: #c42b1c;
   --good: #0f7b0f;
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
+  --shadow: 0 8px 22px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
   --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   color-scheme: light;
 }
@@ -28,7 +29,7 @@
     --accent: #60cdff;
     --bad: #ff99a4;
     --good: #6ccb5f;
-    --shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 1px 4px rgba(0, 0, 0, 0.3);
+    --shadow: 0 8px 22px rgba(0, 0, 0, 0.5), 0 1px 4px rgba(0, 0, 0, 0.3);
     color-scheme: dark;
   }
 }
@@ -39,7 +40,7 @@
 html, body { margin: 0; background: transparent; overflow: hidden; font: 13px/1.35 var(--font); color: var(--ink); user-select: none; -webkit-user-select: none; }
 
 /* Cards sit at the bottom (Windows) or top (Mac) edge of the window. */
-.stack { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.stack { display: flex; flex-direction: column; gap: 8px; padding: 18px 26px 34px; }
 
 .card {
   background: var(--surface);

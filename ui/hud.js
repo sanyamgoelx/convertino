@@ -86,7 +86,8 @@ function done(d) {
   c.el.classList.toggle("bad", !d.ok);
   const fixLabel = { "windows-security": "Open Windows Security", "mac-privacy": "Open Privacy settings" }[d.fix];
   const buttons = [];
-  if (d.ok) buttons.push(`<button type="button" data-a="open">${isMac ? "Show in Finder" : "Open folder"}</button>`, `<button type="button" data-a="undo">Undo</button>`);
+  if (d.compare) buttons.push(`<button type="button" data-a="compare">Compare</button>`);
+  if (d.ok && d.canUndo !== false) buttons.push(`<button type="button" data-a="open">${isMac ? "Show in Finder" : "Open folder"}</button>`, `<button type="button" data-a="undo">Undo</button>`);
   if (fixLabel) buttons.push(`<button type="button" data-a="fix">${fixLabel}</button>`);
   if (d.report) buttons.push(`<button type="button" data-a="report">Send report</button>`);
   c.el.innerHTML =
@@ -115,6 +116,10 @@ function done(d) {
     }
   });
   on("fix", () => tauri.core.invoke("open_fix", { kind: d.fix }).catch(() => {}));
+  on("compare", () => tauri.core.invoke("compare_open", { id: d.id }).catch((e) => {
+    c.el.querySelector(".body").textContent = String(e);
+    fit();
+  }));
   on("report", async (b) => {
     clearTimeout(c.timer);
     b.disabled = true;

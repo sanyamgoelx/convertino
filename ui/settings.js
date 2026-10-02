@@ -22,12 +22,10 @@ const QGROUPS = [
     { k: "webp", label: "WebP quality", desc: "Only when File size is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
     { k: "convertMax", label: "Size when converting", desc: "Bigger pictures are scaled down; smaller ones are left as they are",
       options: [[0, "Keep the size"], [3840, "Longest side 3840 px"], [2560, "Longest side 2560 px"], [1920, "Longest side 1920 px"], [1280, "Longest side 1280 px"]] },
-    { k: "resize", label: "Resize to", desc: "Longest side, for Resize on the wheel; smaller pictures are left as they are",
-      options: [[1280, "1280 px"], [1920, "1920 px"], [2560, "2560 px"], [3840, "3840 px (4K)"]] },
   ] },
   { title: "PDF", rows: [
     { k: "dpi", label: "Page images", desc: "Resolution of JPG, PNG and WebP pages", options: [[72, "Screen (72 DPI)"], [150, "Standard (150 DPI)"], [300, "Print (300 DPI)"]] },
-    { k: "pdfCompress", label: "Compress", desc: "How close the compressed PDF must look to the original; the smallest version that does is kept", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["high", "Best quality"]] },
+    { k: "pdfCompress", label: "Compress", desc: "For the size ring's top choice: how close the compressed PDF must look to the original; the smallest version that does is kept", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["high", "Best quality"]] },
   ] },
   { title: "Audio", rows: [
     { k: "mp3", label: "MP3 quality", desc: "Variable bitrate: quiet and simple parts take less space. Never more than a lossy original had. Also used when pulling audio out of video", options: [[128, "About 130 kbps"], [160, "About 165 kbps"], [192, "About 190 kbps"], [320, "Highest (about 245 kbps)"]] },
@@ -709,7 +707,7 @@ function demoInvoke(cmd, args) {
     },
     shortcut: "ctrl+alt+shift+KeyC",
     families: [
-      { id: "image", label: "Images", targets: [["image.jpg", "JPG", "Quality 90 · keeps EXIF"], ["image.png", "PNG", "Lossless"], ["image.webp", "WEBP", "Quality 85"], ["image.avif", "AVIF", "Smallest"], ["image.pdf", "PDF", "One page per picture"], ["image.ico", "ICO", "16 to 256 px"], ["image.resize", "Resize", "Longest side 1920 px"], ["image.tiff", "TIFF", "Lossless"], ["image.bmp", "BMP", "Uncompressed"], ["image.gif", "GIF", "256 colours"]] },
+      { id: "image", label: "Images", targets: [["image.jpg", "JPG", "Quality 90 · keeps EXIF"], ["image.png", "PNG", "Lossless"], ["image.webp", "WEBP", "Quality 85"], ["image.avif", "AVIF", "Smallest"], ["image.pdf", "PDF", "One page per picture"], ["image.ico", "ICO", "16 to 256 px"], ["image.compress", "Compress", "Pick a file size"], ["image.tiff", "TIFF", "Lossless"], ["image.bmp", "BMP", "Uncompressed"], ["image.gif", "GIF", "256 colours"]] },
       { id: "doc", label: "Documents", targets: [["doc.pdf", "PDF", "Keeps the layout"], ["doc.txt", "TXT", "Plain text"], ["doc.md", "Markdown", "Headings, lists"]] },
     ].map((f) => ({ id: f.id, label: f.label, targets: f.targets.map(([id, label, hint]) => ({ id, label, hint, hidden: false })) })),
     tools: [

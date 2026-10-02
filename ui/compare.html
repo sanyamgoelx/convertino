@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare – Convertino</title>
+<link rel="stylesheet" href="compare.css">
+</head>
+<body>
+  <header>
+    <div class="titles">
+      <h1 id="title">Compare</h1>
+      <span class="what" id="what"></span>
+    </div>
+    <div class="nav" id="nav" hidden>
+      <button type="button" id="prev" aria-label="Previous file">‹</button>
+      <span id="count"></span>
+      <button type="button" id="next" aria-label="Next file">›</button>
+    </div>
+  </header>
+  <main id="stage" class="stage" aria-busy="true">
+    <div class="frame" id="frame">
+      <img id="right" alt="Compressed">
+      <div class="left" id="leftwrap"><img id="left" alt="Original"></div>
+      <div class="handle" id="handle" aria-hidden="true"><span></span></div>
+      <span class="tag l" id="leftLabel"></span>
+      <span class="tag r" id="rightLabel"></span>
+    </div>
+    <p class="status" id="status">Getting the pictures ready…</p>
+  </main>
+  <footer>
+    <label for="slider">Slide to compare</label>
+    <input id="slider" type="range" min="0" max="100" value="50">
+    <button type="button" class="primary" id="done">Done</button>
+  </footer>
+  <script src="compare.js"></script>
+</body>
+</html>

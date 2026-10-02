@@ -243,3 +243,42 @@ body.ringmode .ring { display: block; }
 .opts-buttons .primary { border: 0; background: var(--accent); color: var(--on-accent); font-weight: 600; padding: 0 16px; }
 .opts select:focus-visible, .opts button:focus-visible, .opts input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 body.with-opts .wheel { opacity: 0.55; transition: opacity 0.15s; }
+
+/* Compress: the size ring. Slots show a size and what it costs; the centre
+   turns into a size box for "Custom…" or when a number is typed. */
+.slot.sized { gap: 2px; }
+.slot.sized .lbl { font-size: 15px; font-variant-numeric: tabular-nums; }
+.slot .sub { font-size: 9.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); max-width: 84px; line-height: 1.15; }
+.slot.on .sub { color: var(--accent-fg); }
+:root[data-os="mac"] .slot.on .sub { color: var(--on-accent); }
+
+.size-hub { gap: 4px; padding: 8px; margin: 0; }
+.size-hub .hm { font-size: 10.5px; }
+.size-hub.custom { gap: 5px; }
+.size-row { display: flex; align-items: center; gap: 4px; }
+.size-hub input {
+  width: 58px; height: 30px; box-sizing: border-box; padding: 0 4px;
+  border: 1px solid var(--surface-line); border-bottom: 2px solid var(--accent-fg); border-radius: 5px;
+  background: var(--hub-bg); color: var(--ink);
+  font: 600 16px/1 var(--font); text-align: center; font-variant-numeric: tabular-nums;
+  user-select: text; -webkit-user-select: text; cursor: text;
+}
+.size-hub input:focus { outline: none; border-color: var(--accent-fg); }
+.hub-btn, .size-hub .unit, .seg-btn, .hint-btn {
+  font: inherit; cursor: pointer; color: var(--ink);
+  border: 1px solid var(--surface-line); background: var(--seg);
+}
+.size-hub .unit { width: 34px; height: 30px; padding: 0; border-radius: 5px; font-size: 12px; font-weight: 600; }
+.hub-btn { height: 24px; padding: 0 9px; border-radius: 12px; font-size: 11px; white-space: nowrap; }
+.hub-btn.icon { width: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.hub-btn.primary, .hint-btn.primary { background: var(--accent); border-color: transparent; color: var(--on-accent); font-weight: 600; }
+.hub-btn.primary:disabled { opacity: 0.45; cursor: default; }
+.hub-btn:hover:not(:disabled), .size-hub .unit:hover, .hint-btn:hover { filter: brightness(0.96); }
+.seg-toggle { display: flex; padding: 2px; border-radius: 11px; background: var(--seg); border: 1px solid var(--seg-line); }
+.seg-btn { height: 19px; padding: 0 7px; border: 0; border-radius: 9px; background: transparent; font-size: 10.5px; font-weight: 600; color: var(--ink-2); }
+.seg-btn.on { background: var(--hub-bg); color: var(--accent-fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.hint-acts { width: 100%; display: flex; justify-content: center; gap: 6px; margin-top: 4px; }
+.hint-btn { height: 26px; padding: 0 12px; border-radius: 5px; font-size: 12px; }
+.size-hub button:focus-visible, .hint-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root[data-os="mac"] .hint-btn { border-radius: 7px; }
+.ring.wide .ring-text { max-width: 130px; }

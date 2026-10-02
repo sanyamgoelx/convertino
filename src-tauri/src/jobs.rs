@@ -16,6 +16,17 @@ use tauri::{AppHandle, Emitter};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Originals and results of finished Compress jobs, for Compare.
+fn pairs() -> &'static Mutex<HashMap<u64, Vec<(PathBuf, PathBuf)>>> {
+    static P: OnceLock<Mutex<HashMap<u64, Vec<(PathBuf, PathBuf)>>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The (original, result) pairs of a finished Compress job.
+pub fn compare_pairs(id: u64) -> Vec<(PathBuf, PathBuf)> {
+    pairs().lock().ok().and_then(|p| p.get(&id).cloned()).unwrap_or_default()
+}
+
 /// Outputs of finished jobs, for Open folder and Undo.
 fn outputs() -> &'static Mutex<HashMap<u64, Vec<PathBuf>>> {
     static OUT: OnceLock<Mutex<HashMap<u64, Vec<PathBuf>>>> = OnceLock::new();
@@ -61,11 +72,13 @@ struct Done {
     fix: Option<&'static str>,
     /// The card offers "Send report" (a failure, and reports are set up).
     report: bool,
+    /// Compress: the original and the result can be compared side by side.
+    compare: bool,
 }
 
 impl Done {
     fn plain(id: u64, ok: bool, title: String, body: String, can_undo: bool) -> Done {
-        Done { id, ok, title, body, can_undo, attention: false, fix: None, report: false }
+        Done { id, ok, title, body, can_undo, attention: false, fix: None, report: false, compare: false }
     }
 }
 
@@ -87,7 +100,8 @@ fn file_name(p: &std::path::Path) -> String {
 /// "Converted to MP3", or the action's own wording.
 fn done_title(target_id: &str, label: &str) -> String {
     match target_id {
-        "image.resize" => "Resized".into(),
+        "image.compress" | "video.compress" | "pdf.compress" | "audio.compress" if label == "Compress" => "Compressed".into(),
+        "image.compress" | "video.compress" | "pdf.compress" | "audio.compress" => format!("Compressed to {label}"),
         "audio.trim" => "Trimmed silence".into(),
         "audio.normalize" => "Normalized loudness".into(),
         "video.mp3" | "video.wav" => format!("Extracted audio as {label}"),
@@ -107,6 +121,7 @@ pub fn start(
     ring: bool,
     quality: Option<crate::settings::Quality>,
     wait_for_dialog: Option<isize>,
+    size: Option<crate::size::Ask>,
 ) -> u64 {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     std::thread::spawn(move || {
@@ -137,8 +152,14 @@ pub fn start(
         }
 
         let quality = quality.unwrap_or_else(|| crate::settings::get().quality);
-        let steps = match convert::plan_with(&target_id, &files, &quality) {
+        let (steps, mut notes) = match convert::plan_sized(&target_id, &files, &quality, size) {
             Ok(s) => s,
+            // Every file is already small enough: nothing to do, and that's fine.
+            Err(reason) if reason.starts_with(crate::size::ALREADY) => {
+                let body = reason[crate::size::ALREADY.len()..].to_string();
+                emit(&app, "job-done", Done { attention: true, ..Done::plain(id, true, "Nothing to do".into(), body, false) });
+                return;
+            }
             Err(reason) => {
                 log::info!("job {id}: {target_id} not available: {reason}");
                 let report = crate::report::remember(id, &target_id, &files, &[reason.clone()]);
@@ -150,6 +171,7 @@ pub fn start(
         let total = steps.len();
         let started = Instant::now();
         let (made, errors, cancelled) = run_steps(&app, id, &steps);
+        notes.extend(convert::take_notes(id));
         log::info!("job {id}: {} made, {} failed, {:?}", made.len(), errors.len(), started.elapsed());
 
         let size: u64 = made.iter().map(|p| disk_size(p)).sum();
@@ -196,8 +218,22 @@ pub fn start(
             if !errors.is_empty() {
                 body.push_str(&format!("\n{} failed: {}", errors.len(), errors[0]));
             }
+            for n in &notes {
+                body.push_str(&format!("\n{n}"));
+            }
+            // Compress: what each result was made from, for Compare (not for sound).
+            let compare = crate::size::Kind::of_target(&target_id).is_some_and(|k| k != crate::size::Kind::Audio);
+            if compare {
+                let made_from: Vec<(PathBuf, PathBuf)> = steps
+                    .iter()
+                    .filter_map(|st| made.iter().find(|m| m.file_stem().map(|x| x.to_string_lossy().starts_with(&st.stem)).unwrap_or(false)).map(|m| (st.inputs[0].clone(), m.clone())))
+                    .collect();
+                if let Ok(mut p) = pairs().lock() {
+                    p.insert(id, made_from);
+                }
+            }
             let attention = fix.is_some() || body.contains('\n');
-            Done { id, ok: true, title: done_title(&target_id, &label), body, can_undo: true, attention, fix, report }
+            Done { id, ok: true, title: done_title(&target_id, &label), body, can_undo: true, attention, fix, report, compare }
         };
         if let Ok(mut o) = outputs().lock() {
             o.insert(id, made);

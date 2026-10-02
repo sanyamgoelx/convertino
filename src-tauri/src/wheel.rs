@@ -179,13 +179,10 @@ fn live_hint(id: &str, hint: &str, q: &Quality) -> String {
     };
     match id {
         "pdf.jpg" | "pdf.png" | "pdf.webp" => hint.replace("150 DPI", &format!("{} DPI", q.dpi)),
-        "pdf.compress" => "Smallest that still looks the same".to_string(),
         "audio.mp3" | "video.mp3" => hint.replace("320 kbps", &mp3),
         "image.jpg" if fixed => hint.replace("Quality 90", &format!("Quality {}", q.jpg)),
         "image.webp" if fixed => hint.replace("Quality 85", &format!("Quality {}", q.webp)),
         "image.jpg" | "image.webp" | "image.avif" => "Smallest that still looks the same".to_string(),
-        "video.compress" => "H.265 · smallest that still looks the same".to_string(),
-        "image.resize" => hint.replace("1920 px", &format!("{} px", q.resize)),
         "video.gif" => hint.replace("480 px", &format!("{} px", q.gif_width)),
         _ => hint.to_string(),
     }

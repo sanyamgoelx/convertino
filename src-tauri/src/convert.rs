@@ -10,7 +10,7 @@
 use crate::look::{self, Level, Lossy};
 use crate::settings::Quality;
 use crate::tools::{self, Tool};
-use crate::{archive, data, procs, video};
+use crate::{archive, data, procs, size, video};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -69,6 +69,8 @@ pub enum Op {
     Extract,
     /// Unpack and pack again in another format.
     Repack { to: archive::Pack },
+    /// Compress to a size (None: the smallest that still looks the same).
+    ToSize { kind: size::Kind, bytes: Option<u64>, trim: Option<f64> },
 }
 
 /// One unit of work producing one output file or folder.
@@ -171,6 +173,27 @@ pub fn plan(target_id: &str, files: &[PathBuf]) -> Result<Vec<Step>, String> {
 
 /// The steps with these quality settings (Settings, or Shift+click options on the wheel).
 pub fn plan_with(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<Step>, String> {
+    plan_sized(target_id, files, q, None).map(|(steps, _)| steps)
+}
+
+/// The steps, with a size from the wheel's size ring for Compress, and notes
+/// for the person (files already small enough are left out).
+pub fn plan_sized(target_id: &str, files: &[PathBuf], q: &Quality, ask: Option<size::Ask>) -> Result<(Vec<Step>, Vec<String>), String> {
+    if files.is_empty() {
+        return Err("There was nothing to convert.".into());
+    }
+    // Compress to a size; without one, pictures and audio still go through it
+    // (the smallest that looks the same), video and PDF keep their own Compress.
+    if let Some(kind) = size::Kind::of_target(target_id) {
+        if ask.is_some() || matches!(kind, size::Kind::Image | size::Kind::Audio) {
+            let p = size::plan(kind, files, ask)?;
+            return Ok((p.steps, p.notes));
+        }
+    }
+    plan_plain(target_id, files, q).map(|steps| (steps, Vec::new()))
+}
+
+fn plan_plain(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<Step>, String> {
     if files.is_empty() {
         return Err("There was nothing to convert.".into());
     }
@@ -240,27 +263,6 @@ pub fn plan_with(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<
             None,
             magick(s(&["-background", "none", "-define", "icon:auto-resize=256,128,64,48,32,16"]), true),
         ),
-        "image.resize" => files
-            .iter()
-            .map(|f| {
-                let (_, stem, src_ext) = split(f);
-                // Formats ImageMagick reads but can't reliably write go to JPG/PNG.
-                let ext = match src_ext.as_str() {
-                    "heic" | "heif" | "avif" => "jpg".to_string(),
-                    "svg" | "ico" => "png".to_string(),
-                    _ => src_ext,
-                };
-                let px = q.resize;
-                let args = s(&["-resize", &format!("{px}x{px}>")]);
-                let op = match ext.as_str() {
-                    "jpg" | "jpeg" => picture([flatten(), args].concat(), Lossy::Jpg, q.jpg),
-                    "webp" => picture(args, Lossy::Webp, q.webp),
-                    "png" => png(args),
-                    _ => magick(args, true),
-                };
-                one(f, format!("{stem} ({px}px)"), &ext, false, op)
-            })
-            .collect(),
         "image.pdf" => {
             let (dir, stem, _) = split(&files[0]);
             let stem = if files.len() == 1 { stem } else { "Combined images".to_string() };
@@ -920,6 +922,7 @@ fn run_op(step: &Step, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<P
             Ok(output.to_path_buf())
         }
         Op::Video { job, opts } => video::run(input, *job, opts, output, progress),
+        Op::ToSize { kind, bytes, trim } => size::run(*kind, input, *bytes, *trim, output, progress),
         Op::Data { to } => {
             data::convert(input, *to, output)?;
             Ok(output.to_path_buf())
@@ -1193,6 +1196,100 @@ fn pdf_compress(input: &Path, level: Level, output: &Path, progress: &mut dyn Fn
     move_file(&path, output)
 }
 
+/// Strengths tried for a PDF size, gentlest first.
+const PDF_SIZE_STRENGTHS: [Option<u32>; 8] = [None, Some(300), Some(200), Some(150), Some(110), Some(90), Some(72), Some(50)];
+
+/// PDF Compress to a size: every strength is made (four at a time) and the
+/// gentlest one that fits wins. When none fits, the smallest is kept and
+/// the card says so. Without a size: the usual Compress.
+pub(crate) fn pdf_to_size(input: &Path, target: Option<u64>, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
+    let Some(target) = target else {
+        let level = match crate::settings::get().quality.pdf_compress.as_str() {
+            "small" => Level::Small,
+            "high" => Level::Best,
+            _ => Level::Balanced,
+        };
+        return pdf_compress(input, level, output, progress);
+    };
+    let exe = tools::require(Tool::Ghostscript)?;
+    let plain = Plain::new([input])?;
+    let src = plain.input(input, 0)?;
+    let tmp = TempDir::new("pdfs")?;
+    let job = procs::current_job();
+    let mut made: Vec<(Option<u32>, PathBuf, u64)> = Vec::new();
+    for (round, batch) in PDF_SIZE_STRENGTHS.chunks(4).enumerate() {
+        let versions: Vec<(Option<u32>, Result<PathBuf, String>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = batch
+                .iter()
+                .map(|dpi| {
+                    let (exe, src, dir) = (&exe, &src, &tmp.0);
+                    let dpi = *dpi;
+                    scope.spawn(move || {
+                        procs::set_current_job(job);
+                        let out = dir.join(format!("s{}.pdf", dpi.unwrap_or(0)));
+                        let mut cmd = tools::command(exe);
+                        cmd.args(["-sDEVICE=pdfwrite", "-dNOPAUSE", "-dBATCH", "-dQUIET", "-dSAFER"])
+                            .args(pdf_compress_args(dpi))
+                            .arg(format!("-sOutputFile={}", out.display()))
+                            .arg(src);
+                        (dpi, exec(Tool::Ghostscript, cmd).map(|_| out))
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap_or((None, Err("Ghostscript stopped".into())))).collect()
+        });
+        if procs::cancelled_here() {
+            return Err(procs::CANCELLED.into());
+        }
+        for (dpi, r) in versions {
+            match r {
+                Ok(p) => {
+                    let size = p.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
+                    log::info!("PDF size: at {dpi:?} DPI {size} bytes (target {target})");
+                    made.push((dpi, p, size));
+                }
+                Err(e) => log::info!("PDF size at {dpi:?} DPI failed: {e}"),
+            }
+        }
+        progress(0.5 * (round + 1) as f64);
+        // The gentlest that fits, in the order tried.
+        if let Some(fit) = PDF_SIZE_STRENGTHS.iter().find_map(|d| made.iter().find(|m| m.0 == *d && m.2 <= target)) {
+            log::info!("PDF size: {:?} DPI fits", fit.0);
+            return move_file(&fit.1, output);
+        }
+    }
+    let before = input.metadata().map(|m| m.len()).unwrap_or(0);
+    let smallest = made.iter().min_by_key(|m| m.2).ok_or("Ghostscript couldn't compress this PDF.")?;
+    if smallest.2 as f64 >= before as f64 * 0.95 {
+        return Err("This PDF is already compact; compressing it wouldn't make it smaller.".into());
+    }
+    note(format!(
+        "{} couldn't get under {}; this is the smallest it can be ({}). Its text and drawings take the room, not pictures.",
+        input.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        size::words(target),
+        size::words(smallest.2)
+    ));
+    move_file(&smallest.1, output)
+}
+
+/// Notes for the person, per job ("couldn't get under 2 MB"), shown on the card.
+fn notes() -> &'static Mutex<HashMap<u64, Vec<String>>> {
+    static N: OnceLock<Mutex<HashMap<u64, Vec<String>>>> = OnceLock::new();
+    N.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn note(text: String) {
+    log::info!("note: {text}");
+    if let Ok(mut n) = notes().lock() {
+        n.entry(procs::current_job()).or_default().push(text);
+    }
+}
+
+/// The notes a job left, once.
+pub(crate) fn take_notes(job: u64) -> Vec<String> {
+    notes().lock().ok().and_then(|mut n| n.remove(&job)).unwrap_or_default()
+}
+
 /// A LibreOffice profile of our own, so a running LibreOffice doesn't block conversions.
 fn office_profile_url() -> String {
     let dir = std::env::temp_dir().join("convertino-libreoffice-profile");
@@ -1251,7 +1348,15 @@ pub(crate) fn parse_duration(line: &str) -> Option<f64> {
 }
 
 pub(crate) fn run_ffmpeg(input: &Path, args: &[String], output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
+    run_ffmpeg_in(None, input, args, output, progress)
+}
+
+/// FFmpeg working in `dir` (two-pass encoding writes its log there).
+pub(crate) fn run_ffmpeg_in(dir: Option<&Path>, input: &Path, args: &[String], output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
     let mut cmd = tools::command(&tools::require(Tool::Ffmpeg)?);
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
     cmd.args(["-hide_banner", "-nostdin", "-n", "-i"])
         .arg(input)
         .args(args)
@@ -1364,9 +1469,10 @@ mod tests {
         };
         let jpg = args(plan_with("image.jpg", &f("a.png"), &q).unwrap());
         assert!(jpg.contains("fixed=72") && jpg.contains("-resize 2560x2560>"), "{jpg}");
-        let resized = plan_with("image.resize", &f("a.jpg"), &q).unwrap();
-        assert_eq!(resized[0].stem, "a (1280px)");
-        assert!(args(resized).contains("1280x1280>"));
+        // Compress to a size: the size names the file, the step carries it.
+        let ask = crate::size::Ask { bytes: 2 * crate::size::MB, together: false, trim: None };
+        let (sized, _) = plan_sized("video.compress", &f("a.mp4"), &q, Some(ask)).unwrap_or_default();
+        assert!(sized.is_empty(), "missing files can't be measured");
         assert!(args(plan_with("audio.mp3", &f("a.wav"), &q).unwrap()).contains("mp3=192"));
         assert!(args(plan_with("pdf.compress", &f("a.pdf"), &q).unwrap()).contains("Small"));
         match &plan_with("pdf.jpg", &f("a.pdf"), &q).unwrap()[0].op {
@@ -1475,7 +1581,7 @@ mod tests {
         if let Some(im) = tools::find(Tool::Magick) {
             let png = d.join("pic.png");
             assert!(tools::command(&im).args(["-size", "64x48", "gradient:red-blue"]).arg(&png).status().unwrap().success());
-            for target in ["image.jpg", "image.webp", "image.ico", "image.resize", "image.gif"] {
+            for target in ["image.jpg", "image.webp", "image.ico", "image.compress", "image.gif"] {
                 run_target(target, &[png.clone()]);
             }
         }
