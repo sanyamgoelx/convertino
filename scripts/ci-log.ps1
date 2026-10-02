@@ -1,10 +1,10 @@
-# Saves the logs of the latest GitHub build's failed jobs to ci.log (for Claude to read).
+﻿# Saves the logs of the latest failed GitHub run's failed jobs to ci.log (for Claude to read).
 $ErrorActionPreference = "Continue"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $gh = "$env:ProgramFiles\GitHub CLI\gh.exe"
 $repo = "sanyamgoelx/convertino"
-$id = & $gh run list --repo $repo --limit 1 --json databaseId --jq ".[0].databaseId"
+$id = & $gh run list --repo $repo --status failure --limit 1 --json databaseId --jq ".[0].databaseId"
 "run $id" | Set-Content -Path ci.log -Encoding utf8
 $data = (& $gh api "repos/$repo/actions/runs/$id/jobs") -join "`n" | ConvertFrom-Json
 foreach ($j in $data.jobs) {

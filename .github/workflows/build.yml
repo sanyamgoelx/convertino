@@ -90,6 +90,10 @@ jobs:
           "$T/imagemagick/magick" /tmp/g.png -quality 80 /tmp/g.jpg && "$T/imagemagick/magick" /tmp/g.png /tmp/g.webp && "$T/imagemagick/magick" /tmp/g.png /tmp/g.avif && echo "magick jpg/webp/avif OK"
           "$T/imagemagick/magick" /tmp/g.png /tmp/g.pdf && echo "magick pdf OK"
           "$T/poppler/bin/pdftoppm" -png -r 72 /tmp/g.pdf /tmp/page && ls /tmp/page* && echo "pdftoppm OK"
+          # Same data path the app sets (tools.rs, GS_LIB), so this doesn't lean on Homebrew's own Ghostscript.
+          GSS="$T/ghostscript/share/ghostscript"; GL=""
+          for v in "$GSS" "$GSS"/*; do if [ -d "$v/Resource/Init" ]; then GL="$GL:$v/Resource/Init:$v/lib:$v/Resource/Font:$v/iccprofiles"; fi; done
+          export GS_LIB="${GL#:}:$GSS/fonts"
           "$T/ghostscript/bin/gs" -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=/tmp/g2.pdf /tmp/g.pdf && echo "gs OK"
 
       - name: Build app and installers (Windows)
