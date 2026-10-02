@@ -1,6 +1,6 @@
 [package]
 name = "convertino"
-version = "0.1.3"
+version = "0.1.4"
 description = "Convert any file from a radial wheel in Explorer or Finder"
 authors = ["Crofty"]
 license = "GPL-3.0-or-later"
@@ -58,7 +58,8 @@ opt-level = 3
 opt-level = 3
 
 [profile.release]
-codegen-units = 1
-lto = true
+# Thin LTO: nearly the same size and speed as full LTO, but links in parallel,
+# which cuts CI builds (the Intel Mac most) by several minutes.
+lto = "thin"
 opt-level = "s"
 strip = true

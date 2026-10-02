@@ -38,22 +38,42 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # shared-key: Build and Release use the same compiled dependencies, so a
+      # release doesn't start from scratch.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          shared-key: ${{ matrix.name }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install JS dependencies
-        run: npm install
+        run: npm ci --no-audit --no-fund
 
       - name: Retina background for the .dmg window
         if: runner.os == 'macOS'
         run: tiffutil -cathidpicheck src-tauri/installer/dmg-background.png src-tauri/installer/dmg-background@2x.png -out src-tauri/installer/dmg-background.tiff
 
-      - name: Bundle the Mac converters
+      # The Mac converters only change when Homebrew does: rebuilt once a month
+      # (or when the script changes) instead of on every run.
+      - name: Month (for the converter cache)
         if: runner.os == 'macOS'
+        id: month
+        run: echo "m=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Cached Mac converters
+        if: runner.os == 'macOS'
+        id: tools
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/mac-tools
+          key: mac-tools-${{ matrix.name }}-${{ hashFiles('ci/bundle-mac-tools.sh') }}-${{ steps.month.outputs.m }}
+
+      - name: Bundle the Mac converters
+        if: runner.os == 'macOS' && steps.tools.outputs.cache-hit != 'true'
         run: |
           sw_vers
           bash ci/bundle-mac-tools.sh src-tauri/mac-tools
@@ -105,8 +125,10 @@ jobs:
           if-no-files-found: error
 
       # ---- Mac checks: real conversions with the bundled converters ----
+      # On Apple silicon every time; the Intel Mac (a much slower runner) only
+      # checks its bundled converters above, unless the run is started by hand.
       - name: Download the other converters (Mac)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch')
         run: |
           mkdir -p src-tauri/tools
           cp -R src-tauri/mac-tools/* src-tauri/tools/
@@ -114,6 +136,6 @@ jobs:
           cargo test --lib install::tests::fetch_tools -- --ignored --nocapture
 
       - name: Tests with real conversions (Mac)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch')
         working-directory: src-tauri
         run: cargo test --lib -- --nocapture
