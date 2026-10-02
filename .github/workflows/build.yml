@@ -137,7 +137,9 @@ jobs:
           mkdir -p src-tauri/tools
           cp -R src-tauri/mac-tools/* src-tauri/tools/
           cd src-tauri
-          cargo test --lib install::tests::fetch_tools -- --ignored --nocapture
+          # One retry: download servers have bad moments, which shouldn't fail the build.
+          cargo test --lib install::tests::fetch_tools -- --ignored --nocapture \
+            || { echo "Retrying the downloads in 30 s"; sleep 30; cargo test --lib install::tests::fetch_tools -- --ignored --nocapture; }
 
       - name: Tests with real conversions (Mac)
         if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch')

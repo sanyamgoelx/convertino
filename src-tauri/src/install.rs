@@ -293,12 +293,8 @@ fn fetch_and_unpack(pack: Pack, work: &Path) -> Result<String, String> {
         }
         Pack::LibreOffice => {
             let version = libreoffice_version()?;
-            let url = format!(
-                "https://download.documentfoundation.org/libreoffice/stable/{version}/win/x86_64/LibreOffice_{version}_Win_x86-64.msi"
-            );
             let msi = w.join("LibreOffice.msi");
-            let size = remote_size(&url);
-            download(&url, size, &msi, name)?;
+            libreoffice_download(&format!("{version}/win/x86_64/LibreOffice_{version}_Win_x86-64.msi"), &msi, name)?;
             report(1.0, &format!("Setting up {name} (this takes a minute)…"));
             msi_unpack(&msi, &staging, name)?;
             format!("LibreOffice {version}")
@@ -1060,9 +1056,48 @@ fn github_download(dir: &Path, repo: &str, pick: impl Fn(&str) -> bool, what: &s
     Ok(dest)
 }
 
+/// Where LibreOffice comes from. The first is The Document Foundation's own
+/// server, which hands each download to a nearby mirror; that mirror is
+/// sometimes unreachable, so well-known mirrors with the same layout follow.
+const LIBREOFFICE_MIRRORS: &[&str] = &[
+    "https://download.documentfoundation.org/libreoffice/stable/",
+    "https://ftp.fau.de/tdf/libreoffice/stable/",
+    "https://mirror.netcologne.de/tdf/libreoffice/stable/",
+    "https://ftp.halifax.rwth-aachen.de/tdf/libreoffice/stable/",
+];
+
 fn libreoffice_version() -> Result<String, String> {
-    let page = fetch_text("https://download.documentfoundation.org/libreoffice/stable/", "LibreOffice")?;
-    newest_listed_version(&page).ok_or_else(|| "Couldn't find the current LibreOffice version.".into())
+    let mut last = String::new();
+    for base in LIBREOFFICE_MIRRORS {
+        match fetch_text(base, "LibreOffice") {
+            Ok(page) => match newest_listed_version(&page) {
+                Some(v) => return Ok(v),
+                None => {
+                    log::warn!("no LibreOffice version listed at {base}");
+                    last = "Couldn't find the current LibreOffice version.".into();
+                }
+            },
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+/// Downloads `path` (relative to the "stable" folder) from the first mirror that works.
+fn libreoffice_download(path: &str, dest: &Path, what: &str) -> Result<(), String> {
+    let mut last = String::new();
+    for base in LIBREOFFICE_MIRRORS {
+        let url = format!("{base}{path}");
+        match download(&url, remote_size(&url), dest, what) {
+            Ok(()) => return Ok(()),
+            Err(e) if e == procs::CANCELLED => return Err(e),
+            Err(e) => {
+                log::warn!("LibreOffice from {base} failed: {e}");
+                last = e;
+            }
+        }
+    }
+    Err(last)
 }
 
 /// The highest `href="X.Y.Z/"` in a directory listing.
@@ -1360,9 +1395,10 @@ mod mac {
         n.starts_with("7z") && n.ends_with("-mac.tar.xz")
     }
 
-    pub fn libreoffice_url(version: &str) -> String {
+    /// The .dmg's path inside LibreOffice's "stable" folder (any mirror).
+    pub fn libreoffice_path(version: &str) -> String {
         let (dir, file) = if arm() { ("aarch64", "aarch64") } else { ("x86_64", "x86-64") };
-        format!("https://download.documentfoundation.org/libreoffice/stable/{version}/mac/{dir}/LibreOffice_{version}_MacOS_{file}.dmg")
+        format!("{version}/mac/{dir}/LibreOffice_{version}_MacOS_{file}.dmg")
     }
 
     fn run(cmd: &mut Command, what: &str, minutes: u64) -> Result<(), String> {
@@ -1448,10 +1484,8 @@ mod mac {
             }
             Pack::LibreOffice => {
                 let version = libreoffice_version()?;
-                let url = libreoffice_url(&version);
                 let dmg = w.join("LibreOffice.dmg");
-                let size = remote_size(&url);
-                download(&url, size, &dmg, name)?;
+                libreoffice_download(&libreoffice_path(&version), &dmg, name)?;
                 report(1.0, &format!("Setting up {name} (this takes a minute)…"));
                 let mnt = w.join("mnt");
                 fs::create_dir_all(&mnt).map_err(|e| e.to_string())?;
@@ -1498,8 +1532,9 @@ mod mac {
             assert!(seven_pick("7z2603-mac.tar.xz") && !seven_pick("7z2603-linux-x64.tar.xz"));
             assert!(pandoc_pick("pandoc-3.12-arm64-macOS.zip") || pandoc_pick("pandoc-3.12-x86_64-macOS.zip"));
             assert!(!pandoc_pick("pandoc-3.12-arm64-macOS.pkg"));
-            let lo = libreoffice_url("26.2.1");
-            assert!(lo.contains("/26.2.1/mac/") && lo.ends_with(".dmg"), "{lo}");
+            let lo = libreoffice_path("26.2.1");
+            assert!(lo.starts_with("26.2.1/mac/") && lo.ends_with(".dmg"), "{lo}");
+            assert!(LIBREOFFICE_MIRRORS.iter().all(|m| m.starts_with("https://") && m.ends_with("/libreoffice/stable/")));
             assert!(Pack::Magick.bundled_on_mac() && !Pack::Ffmpeg.bundled_on_mac());
         }
     }
