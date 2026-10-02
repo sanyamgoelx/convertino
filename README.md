@@ -2,15 +2,29 @@
 
 # Convertino
 
-Convert any file without leaving Explorer or Finder. Select files, press a hotkey
-(or Alt/Option+right-click), pick a format on a radial wheel, and the converted
-file appears next to the original. Everything runs offline, on Windows and macOS.
+Convert any file without leaving Explorer or Finder. **Hold Alt and right-click a
+file**, pick a format on the radial wheel, and the converted file appears next to
+the original. Everything runs offline, on Windows and macOS.
 
-**Status:** milestones 1–4 and 6–8 of 10. The hotkey and Alt+right-click open the wheel;
+## How to use it
+
+| | Windows | Mac |
+|---|---|---|
+| **Default: Alt+right-click** | Hold **Alt** and right-click a file in File Explorer or on the desktop | Hold **⌥ Option** (the Alt key) and right-click a file in Finder |
+| Keyboard shortcut (optional) | Select files, press **Ctrl+Alt+C** | Select files, press **⌃⌥C** |
+
+Alt+right-click is the easiest way and works right after you install (on a Mac,
+after allowing Accessibility once): nothing to set up,
+no shortcut to remember. The wheel opens at your pointer, on the file you clicked
+(or on all selected files if you click one of them). If you'd rather use the
+keyboard, the shortcut is there too; change it to anything you like in
+**Settings › General**.
+
+**Status:** milestones 1–4 and 6–8 of 10. Alt+right-click (and the optional shortcut) open the wheel;
 images, audio, video, PDFs, documents, data files and archives convert for real,
 with a progress ring at the pointer and Undo. "Edit" on the PDF wheel opens an editor:
 rearrange, rotate, delete and add pages, and mark up (text, highlight, draw, signature,
-pictures, form filling), saved as a copy. Settings (click the tray icon) holds the shortcut,
+pictures, form filling), saved as a copy. Settings (click the tray icon) holds the optional shortcut,
 the wheel's order, quality, and the converters, which download the first time they're needed.
 Shift+click a format on the wheel to set options for one conversion. On a Mac, Option-right-click opens the wheel; Settings walks you through the
 two permissions macOS needs. Open/Save dialogs come next.
@@ -105,9 +119,10 @@ The Mac jobs then run the tests with real conversions.
    without a paid Apple certificate).
 3. Convertino's Settings opens at **Permissions**:
    - **Accessibility**: click *Open System Settings* and turn Convertino on. This is
-     what makes Option-right-click work.
+     what makes Option-right-click work, the main way to use Convertino.
    - **Finder**: click *Allow* and then **OK**, so Convertino can see your selection.
-4. Select files in Finder and press **⌃⌥⇧C**, or Option-right-click a file.
+4. Hold **Option** and right-click a file in Finder. (Or select files and press the
+   optional shortcut, shown in Settings.)
 
 After an update, macOS may ask for Accessibility again (the app's signature changes).
 

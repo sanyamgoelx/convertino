@@ -19,7 +19,7 @@
         <h2 class="perm-head">Permissions</h2>
         <div class="card list">
           <div class="item">
-            <div class="grow"><div>Accessibility</div><div class="sub">Lets Option-right-click open the wheel</div></div>
+            <div class="grow"><div>Accessibility</div><div class="sub">Lets Option-right-click open the wheel (the main way to use Convertino)</div></div>
             <span class="perm-state" id="perm-ax"></span>
             <button type="button" class="btn primary" id="perm-ax-btn">Open System Settings</button>
           </div>
@@ -32,12 +32,27 @@
         <div class="sub perm-note" id="perm-note">In System Settings, turn on Convertino in the list. Convertino notices by itself; no restart needed.</div>
         <h2 class="perm-head">General</h2>
       </div>
+      <!-- How to convert: Alt+right-click is the default, shown first. -->
+      <div class="card hero" id="howto">
+        <div class="hero-keys" aria-hidden="true"><span class="key" id="hero-key">Alt</span><span class="plus">+</span><span class="key mouse"><svg class="ic sm" viewBox="0 0 24 24"><path d="M7 3h10v8a5 5 0 01-10 0z M12 3v5"/></svg>Right-click</span></div>
+        <div class="grow">
+          <div class="big" id="hero-title">Hold Alt and right-click any file</div>
+          <div class="sub" id="hero-sub">The easiest way to convert: the wheel opens right at your pointer in File Explorer or on the desktop. Pick a format and you're done.</div>
+        </div>
+      </div>
+
+      <div class="card row">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v8a5 5 0 01-10 0z M12 3v5"/></svg>
+        <div class="grow"><div><span id="alt-title">Alt+right-click on files</span> <span class="pill">Default</span></div><div class="sub" id="alt-sub">Recommended. Opens the wheel for the file under the pointer</div></div>
+        <span class="state" data-state-for="altClick"></span>
+        <button type="button" class="switch" role="switch" data-key="altClick" aria-labelledby="alt-title"><span></span></button>
+      </div>
       <div class="card">
         <div class="row">
           <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4z M7 10h1 M10 10h1 M13 10h1 M16 10h1 M8 14h8"/></svg>
           <div class="grow">
-            <div>Shortcut</div>
-            <div class="sub" id="shortcut-sub">Opens the wheel for the files selected in File Explorer or on the desktop</div>
+            <div>Keyboard shortcut <span class="pill quiet">Optional</span></div>
+            <div class="sub" id="shortcut-sub">An extra way to open the wheel for the selected files. Change it to any keys you like</div>
           </div>
           <div class="keys" id="keys"></div>
           <button type="button" class="btn" id="rec-start">Change</button>
@@ -51,12 +66,6 @@
         </div>
       </div>
 
-      <div class="card row">
-        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v8a5 5 0 01-10 0z M12 3v5"/></svg>
-        <div class="grow"><div id="alt-title">Alt+right-click on files</div><div class="sub">Opens the wheel for the file under the pointer, without the shortcut</div></div>
-        <span class="state" data-state-for="altClick"></span>
-        <button type="button" class="switch" role="switch" data-key="altClick" aria-labelledby="alt-title"><span></span></button>
-      </div>
       <div class="card row">
         <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v10 M18.4 6.6a9 9 0 11-12.8 0"/></svg>
         <div class="grow"><div id="login-title">Start Convertino when I sign in</div><div class="sub" id="login-sub">Runs quietly in the system tray</div></div>

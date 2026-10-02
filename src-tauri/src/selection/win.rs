@@ -79,7 +79,7 @@ pub fn selection_for(root: Option<isize>) -> Res<Selection> {
             "#32770" => dialog_selection(fg),
             other => {
                 log::info!("hotkey pressed in a window of class {other}");
-                Err("Select files in File Explorer or on the desktop first, then press the shortcut.".into())
+                Err("Hold Alt and right-click a file in File Explorer or on the desktop. (Or select files first, then press your shortcut.)".into())
             }
         }
     }

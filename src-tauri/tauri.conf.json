@@ -73,7 +73,7 @@
     "license": "GPL-3.0-or-later",
     "category": "Utility",
     "shortDescription": "Convert any file from a radial wheel",
-    "longDescription": "Select files in Explorer or Finder, press a hotkey, pick a format on the wheel, and the converted file appears next to the original. Runs offline.",
+    "longDescription": "Hold Alt (Option on a Mac) and right-click any file in Explorer or Finder, pick a format on the wheel, and the converted file appears next to the original. A keyboard shortcut is optional. Runs offline.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -194,5 +194,5 @@ if (tauri) {
   done({ id: 2, ok: true, title: "Converted to JPG", body: "holiday-goa.jpg · 2.8 MB" });
   done({ id: 3, ok: false, title: "Couldn't convert to MP4", body: "Clip.mov: This file seems to be damaged, or isn't really the type its name says.", report: true });
   done({ id: 4, ok: true, attention: true, fix: "windows-security", title: "Extracted audio as MP3", body: "Clip.mp3 · 3.1 MB\nSaved in Downloads: Windows Security's ransomware protection doesn't let new apps save in Videos. To save next to your files, allow Convertino there." });
-  notice({ title: "Nothing to convert", body: "Select files in File Explorer or on the desktop first, then press the shortcut." });
+  notice({ title: "Nothing to convert", body: "Hold Alt and right-click a file in File Explorer or on the desktop. (Or select files first, then press your shortcut.)" });
 }

@@ -30,6 +30,7 @@ Last updated: 1 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 
 ## Notes
 
+- Messaging: Alt+right-click (Option+right-click on Mac) is THE default way to use Convertino, first in the README, Settings (how-to card at the top of General, "Default" badge) and notices. The keyboard shortcut stays registered in the background but is presented as optional, set up in Settings.
 - Hotkey on this PC: Ctrl+Alt+Shift+C (another app owns Ctrl+Alt+C).
 - Licence: GPL-3.0-or-later. Zero cost: free tools and services only.
 - Formats live in `src-tauri/formats.json`; conversions in `src-tauri/src/convert.rs` (plus `video.rs`, `data.rs`, `archive.rs`).

@@ -160,7 +160,7 @@ function renderShortcut() {
     ? "No shortcut works right now: every default is taken by another app. Choose one with Change."
     : chosen && chosen !== active
       ? `${pretty(chosen)} is taken by another app right now, so ${pretty(active)} is in use.`
-      : `Opens the wheel for the files selected in ${where}`;
+      : `An extra way to open the wheel for the files selected in ${where}. Change it to any keys you like`;
 }
 
 // ---------- rendering ----------
@@ -227,8 +227,16 @@ function render() {
   document.querySelectorAll("[data-state-for]").forEach((el) => { el.textContent = s[el.dataset.stateFor] ? "On" : "Off"; });
   if (isMac()) {
     $("alt-title").textContent = "Option-right-click on files";
+    $("hero-key").textContent = "\u2325 Option";
+    $("hero-title").textContent = "Hold Option (Alt) and right-click any file";
+    if (s.altClick) $("hero-sub").textContent = "The easiest way to convert: the wheel opens right at your pointer in Finder.";
     $("login-title").textContent = "Open Convertino at login";
     $("login-sub").textContent = "Runs quietly in the menu bar";
+  }
+  if (!s.altClick) {
+    $("hero-sub").textContent = "Turned off right now. Switch it back on below: it's the easiest way to convert.";
+  } else if (!isMac()) {
+    $("hero-sub").textContent = "The easiest way to convert: the wheel opens right at your pointer in File Explorer or on the desktop. Pick a format and you're done.";
   }
   if (view.dev) $("login-sub").textContent += " (not applied while developing)";
 
