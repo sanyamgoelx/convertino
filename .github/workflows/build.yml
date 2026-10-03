@@ -89,12 +89,33 @@ jobs:
           "$T/imagemagick/magick" -size 64x48 gradient:red-blue /tmp/g.png && echo "magick gradient OK"
           "$T/imagemagick/magick" /tmp/g.png -quality 80 /tmp/g.jpg && "$T/imagemagick/magick" /tmp/g.png /tmp/g.webp && "$T/imagemagick/magick" /tmp/g.png /tmp/g.avif && echo "magick jpg/webp/avif OK"
           "$T/imagemagick/magick" /tmp/g.png /tmp/g.pdf && echo "magick pdf OK"
+          # Camera RAW photos go through ImageMagick's LibRaw coder.
+          "$T/imagemagick/magick" -list format | grep -E "^ +(DNG|CR3)" || { echo "The bundled ImageMagick can't read RAW photos"; exit 1; }
           "$T/poppler/bin/pdftoppm" -png -r 72 /tmp/g.pdf /tmp/page && ls /tmp/page* && echo "pdftoppm OK"
           # Same data path the app sets (tools.rs, GS_LIB), so this doesn't lean on Homebrew's own Ghostscript.
           GSS="$T/ghostscript/share/ghostscript"; GL=""
           for v in "$GSS" "$GSS"/*; do if [ -d "$v/Resource/Init" ]; then GL="$GL:$v/Resource/Init:$v/lib:$v/Resource/Font:$v/iccprofiles"; fi; done
           export GS_LIB="${GL#:}:$GSS/fonts"
           "$T/ghostscript/bin/gs" -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=/tmp/g2.pdf /tmp/g.pdf && echo "gs OK"
+
+      # Camera RAW samples for the tests (public domain, checked by SHA-256).
+      - name: Cached RAW samples
+        uses: actions/cache@v4
+        with:
+          path: test-files/raw
+          key: raw-samples-${{ hashFiles('ci/fetch-raw-samples.sh') }}
+
+      - name: RAW samples
+        shell: bash
+        run: bash ci/fetch-raw-samples.sh test-files/raw
+
+      # The `convertino` command is a second program in the same crate; built
+      # first so the installers always find it next to the app.
+      - name: Build the convertino command
+        working-directory: src-tauri
+        env:
+          CONVERTINO_REPORT_WEBHOOK: ${{ secrets.CONVERTINO_REPORT_WEBHOOK }}
+        run: cargo build --release --bin convertino-cli
 
       - name: Build app and installers (Windows)
         if: runner.os == 'Windows'
@@ -115,6 +136,7 @@ jobs:
           app=$(ls -d src-tauri/target/release/bundle/macos/*.app)
           echo "Converters inside the app:"
           ls "$app/Contents/Resources/tools"
+          test -x "$app/Contents/MacOS/convertino-cli" || { echo "The convertino command is missing from the app"; exit 1; }
           "$app/Contents/Resources/tools/imagemagick/magick" -version | head -1 || true
           codesign --verify --deep --verbose=2 "$app" || true
           codesign -d --entitlements - "$app" 2>&1 | grep -q automation.apple-events || { echo "Missing apple-events entitlement"; exit 1; }
@@ -144,4 +166,83 @@ jobs:
       - name: Tests with real conversions (Mac)
         if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch')
         working-directory: src-tauri
-        run: cargo test --lib -- --nocapture
+        run: cargo test -- --nocapture
+
+      # ---- Windows checks: the same tests with real conversions ----
+      - name: Month (for the Windows converter cache)
+        if: runner.os == 'Windows'
+        id: wmonth
+        shell: bash
+        run: echo "m=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Cached Windows converters
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/tools
+          key: win-tools-${{ hashFiles('src-tauri/src/install.rs') }}-${{ steps.wmonth.outputs.m }}
+
+      - name: Download the converters (Windows)
+        if: runner.os == 'Windows'
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          cargo test --lib install::tests::fetch_tools -- --ignored --nocapture \
+            || { echo "Retrying the downloads in 30 s"; sleep 30; cargo test --lib install::tests::fetch_tools -- --ignored --nocapture; }
+
+      - name: Tests with real conversions (Windows)
+        if: runner.os == 'Windows'
+        working-directory: src-tauri
+        run: cargo test -- --nocapture
+
+  # ---- The installers themselves, installed the way a person does ----
+  verify-install:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+          - name: macos-apple-silicon
+            os: macos-14
+    runs-on: ${{ matrix.os }}
+    name: install ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: convertino-${{ matrix.name }}
+          path: dist
+
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "v=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Upgrade path: the last published release first, then this build over it.
+      - name: Previous release (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download --repo "$GITHUB_REPOSITORY" --pattern '*-setup.exe' --dir previous || echo "no previous release"
+
+      - name: Install, use and uninstall (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist -Recurse -Filter *-setup.exe | Select-Object -First 1
+          $prev = Get-ChildItem previous -Filter *-setup.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          $opts = @{ Installer = $setup.FullName; Version = "${{ steps.v.outputs.v }}" }
+          if ($prev) { $opts.Previous = $prev.FullName }
+          & ci/verify-install-windows.ps1 @opts
+
+      - name: Install and use (Mac)
+        if: runner.os == 'macOS'
+        run: bash ci/verify-install-mac.sh "$(find dist -name '*.dmg' | head -1)" "${{ steps.v.outputs.v }}"

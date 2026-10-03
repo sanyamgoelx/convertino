@@ -49,7 +49,7 @@ pub enum Kind {
 impl Kind {
     pub fn of_target(target_id: &str) -> Option<Kind> {
         match target_id {
-            "image.compress" => Some(Kind::Image),
+            "image.compress" | "raw.compress" => Some(Kind::Image),
             "video.compress" => Some(Kind::Video),
             "pdf.compress" => Some(Kind::Pdf),
             "audio.compress" => Some(Kind::Audio),
@@ -504,6 +504,12 @@ fn upper(ext: &str) -> String {
     }
 }
 
+/// Already no bigger than `limit`, so left as it is. Never for a RAW photo:
+/// it's compressed into a JPG whatever its size.
+fn keeps(i: &Info, limit: u64) -> bool {
+    i.bytes <= limit && !crate::raw::is_raw(&i.path)
+}
+
 pub fn best(kind: Kind, i: &Info) -> u64 {
     if i.rough {
         return (i.bytes as f64 * 0.6) as u64;
@@ -532,7 +538,7 @@ pub fn floor(kind: Kind, i: &Info) -> u64 {
 /// One file to `target` bytes.
 pub fn preview_one(kind: Kind, i: &Info, target: u64, trim: Option<f64>) -> Preview {
     let mut p = Preview { fits: false, ok: true, short: String::new(), line1: String::new(), line2: String::new(), est: target, min: floor(kind, i), alt: None };
-    if trim.is_none() && i.bytes <= target {
+    if trim.is_none() && keeps(i, target) {
         p.fits = true;
         p.short = "Already fits".into();
         p.line1 = format!("{} is already {}", i.name(), words(i.bytes));
@@ -673,7 +679,7 @@ pub fn shares(kind: Kind, infos: &[Info], total: u64) -> Vec<Option<u64>> {
         let need: f64 = infos.iter().zip(&fitted).filter(|(_, f)| !**f).map(|(i, _)| best(kind, i).max(1) as f64).sum();
         let share = |i: &Info| (budget * best(kind, i).max(1) as f64 / need.max(1.0)) as u64;
         // Tiny files (a fiftieth of the size) aren't worth touching either.
-        let newly: Vec<usize> = infos.iter().enumerate().filter(|(n, i)| !fitted[*n] && (i.bytes <= share(i) || i.bytes * 50 <= total)).map(|(n, _)| n).collect();
+        let newly: Vec<usize> = infos.iter().enumerate().filter(|(n, i)| !fitted[*n] && !crate::raw::is_raw(&i.path) && (i.bytes <= share(i) || i.bytes * 50 <= total)).map(|(n, _)| n).collect();
         if newly.is_empty() {
             return infos.iter().zip(&fitted).map(|(i, f)| if *f { None } else { Some(share(i)) }).collect();
         }
@@ -692,7 +698,7 @@ pub fn preview(kind: Kind, infos: &[Info], target: u64, together: bool, trim: Op
     let targets: Vec<Option<u64>> = if together {
         shares(kind, infos, target)
     } else {
-        infos.iter().map(|i| if i.bytes <= target { None } else { Some(target) }).collect()
+        infos.iter().map(|i| if keeps(i, target) { None } else { Some(target) }).collect()
     };
     let looks: Vec<(usize, Preview)> = targets.iter().enumerate().filter_map(|(n, t)| t.map(|t| (n, preview_one(kind, &infos[n], t, trim)))).collect();
     let small = targets.iter().filter(|t| t.is_none()).count();
@@ -822,7 +828,7 @@ pub fn plan(kind: Kind, files: &[PathBuf], ask: Option<Ask>) -> Result<Planned, 
     let targets: Vec<Option<u64>> = match ask {
         None => infos.iter().map(|_| Some(u64::MAX)).collect(),
         Some(a) if a.together && infos.len() > 1 => shares(kind, &infos, a.bytes),
-        Some(a) => infos.iter().map(|i| if a.trim.is_none() && i.bytes <= a.bytes { None } else { Some(a.bytes) }).collect(),
+        Some(a) => infos.iter().map(|i| if a.trim.is_none() && keeps(i, a.bytes) { None } else { Some(a.bytes) }).collect(),
     };
     let label = ask.map(|a| words(a.bytes));
     let mut steps = Vec::new();

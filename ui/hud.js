@@ -47,14 +47,19 @@ function schedule(id, ms) {
   c.timer = setTimeout(() => remove(id), ms);
 }
 
-function head() {
-  return `<div class="head">${LOGO}<span>Convertino</span><button class="x" type="button" title="Dismiss" aria-label="Dismiss">✕</button></div>`;
+const VIA_ICON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-5-6-5M12 19h8"/></svg>';
+
+// `via`: the AI app that asked for this job (MCP), shown as a badge.
+function head(via) {
+  const badge = via ? `<span class="via" title="${esc(via)} asked Convertino for this">${VIA_ICON}via ${esc(via)}</span>` : "";
+  return `<div class="head">${LOGO}<span>Convertino</span>${badge}<button class="x" type="button" title="Dismiss" aria-label="Dismiss">✕</button></div>`;
 }
 
 function started(job) {
   const c = card(job.id);
+  c.via = job.via;
   c.el.innerHTML =
-    head() +
+    head(job.via) +
     `<div class="title" title="${esc(job.title)}">${esc(job.title)}</div>` +
     `<div class="bar indeterminate"><i></i></div>` +
     `<div class="row"><div class="detail">Starting…</div><button class="cancel" type="button">Cancel</button></div>`;
@@ -83,6 +88,7 @@ function progress(p) {
 function done(d) {
   const c = card(d.id);
   c.done = true;
+  const via = d.via || c.via;
   c.el.classList.toggle("bad", !d.ok);
   const fixLabel = { "windows-security": "Open Windows Security", "mac-privacy": "Open Privacy settings" }[d.fix];
   const buttons = [];
@@ -91,7 +97,7 @@ function done(d) {
   if (fixLabel) buttons.push(`<button type="button" data-a="fix">${fixLabel}</button>`);
   if (d.report) buttons.push(`<button type="button" data-a="report">Send report</button>`);
   c.el.innerHTML =
-    head() +
+    head(via) +
     `<div class="title" title="${esc(d.title)}">${esc(d.title)}</div>` +
     `<div class="body">${esc(d.body)}</div>` +
     (buttons.length ? `<div class="buttons">${buttons.join("")}</div>` : "");
@@ -195,6 +201,8 @@ if (tauri) {
   // Opened in a browser: show sample cards for design checks.
   document.documentElement.style.background = "#6b7a8f";
   started({ id: 1, title: "voice-memo.wav → MP3" });
+  started({ id: 5, title: "12 photos → JPG", via: "Claude Desktop" });
+  progress({ id: 5, fraction: 0.42, detail: "File 5 of 12" });
   progress({ id: 1, fraction: 0.42, detail: "42%" });
   done({ id: 2, ok: true, title: "Converted to JPG", body: "holiday-goa.jpg · 2.8 MB" });
   done({ id: 3, ok: false, title: "Couldn't convert to MP4", body: "Clip.mov: This file seems to be damaged, or isn't really the type its name says.", report: true });

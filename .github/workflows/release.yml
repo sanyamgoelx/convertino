@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
@@ -72,6 +73,13 @@ jobs:
         if: runner.os == 'macOS' && steps.tools.outputs.cache-hit != 'true'
         run: bash ci/bundle-mac-tools.sh src-tauri/mac-tools
 
+      # The `convertino` command goes into the installers next to the app.
+      - name: Build the convertino command
+        working-directory: src-tauri
+        env:
+          CONVERTINO_REPORT_WEBHOOK: ${{ secrets.CONVERTINO_REPORT_WEBHOOK }}
+        run: cargo build --release --bin convertino-cli
+
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -94,6 +102,16 @@ jobs:
 
             **First launch:** Windows may say "Windows protected your PC": click *More info* › *Run anyway*. On a Mac, open System Settings › Privacy & Security and click *Open Anyway* once. Full steps in the README.
           releaseDraft: false
-          prerelease: false
+          # v0.2.0-rc.1 and the like: a pre-release. Installed copies and the
+          # Download link follow "latest", which skips pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           updaterJsonPreferNsis: true
           args: ${{ runner.os == 'macOS' && '--bundles app,dmg' || '' }}
+
+  # The published files, downloaded and installed the way people get them.
+  verify:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/release-verify.yml
+    with:
+      tag: ${{ github.ref_name }}

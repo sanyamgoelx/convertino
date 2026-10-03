@@ -63,3 +63,6 @@ Last updated: 1 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - Compare: finished Compress jobs (not audio) get a Compare button (ring pill and corner card) → compare window (ui/compare.*, compare.rs): original vs result under a slider; video = middle frame, PDF = page 1.
 - Not adopted (user): re-checking the output and redoing it when it comes out over the size.
 
+## Next (3 Oct 2026)
+
+- RAW photos, command line and MCP: plan in `docs/PLAN-RAW-CLI-MCP.md`, mock-up https://claude.ai/artifact/MbTKhjexfYJjFktUAJy4Ga. Waiting for the user's OK on the design before building. Decisions: read all camera RAW (no DNG writing), CLI installed with the app, MCP built in with one-click Connect, AI apps may convert any file they name.

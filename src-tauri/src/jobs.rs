@@ -9,12 +9,9 @@ use crate::convert;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-
-static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Originals and results of finished Compress jobs, for Compare.
 fn pairs() -> &'static Mutex<HashMap<u64, Vec<(PathBuf, PathBuf)>>> {
@@ -28,7 +25,7 @@ pub fn compare_pairs(id: u64) -> Vec<(PathBuf, PathBuf)> {
 }
 
 /// Outputs of finished jobs, for Open folder and Undo.
-fn outputs() -> &'static Mutex<HashMap<u64, Vec<PathBuf>>> {
+fn outputs_map() -> &'static Mutex<HashMap<u64, Vec<PathBuf>>> {
     static OUT: OnceLock<Mutex<HashMap<u64, Vec<PathBuf>>>> = OnceLock::new();
     OUT.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -41,6 +38,9 @@ struct Started {
     family: String,
     /// The progress ring shows this job; the HUD waits for a hand-over.
     ring: bool,
+    /// The AI app that asked for it (MCP), for the card's badge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    via: Option<String>,
 }
 
 /// Every job event goes to the ring (wheel window) and the corner card (HUD).
@@ -74,34 +74,23 @@ struct Done {
     report: bool,
     /// Compress: the original and the result can be compared side by side.
     compare: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    via: Option<String>,
 }
 
 impl Done {
     fn plain(id: u64, ok: bool, title: String, body: String, can_undo: bool) -> Done {
-        Done { id, ok, title, body, can_undo, attention: false, fix: None, report: false, compare: false }
+        Done { id, ok, title, body, can_undo, attention: false, fix: None, report: false, compare: false, via: None }
     }
 }
 
-fn human_size(bytes: u64) -> String {
-    let b = bytes as f64;
-    if b >= 1e9 {
-        format!("{:.2} GB", b / 1e9)
-    } else if b >= 1e6 {
-        format!("{:.1} MB", b / 1e6)
-    } else {
-        format!("{} KB", ((b / 1e3).round() as u64).max(1))
-    }
-}
-
-fn file_name(p: &std::path::Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
-}
+use crate::engine::{disk_size, file_name, human_size};
 
 /// "Converted to MP3", or the action's own wording.
 fn done_title(target_id: &str, label: &str) -> String {
     match target_id {
-        "image.compress" | "video.compress" | "pdf.compress" | "audio.compress" if label == "Compress" => "Compressed".into(),
-        "image.compress" | "video.compress" | "pdf.compress" | "audio.compress" => format!("Compressed to {label}"),
+        "image.compress" | "raw.compress" | "video.compress" | "pdf.compress" | "audio.compress" if label == "Compress" => "Compressed".into(),
+        "image.compress" | "raw.compress" | "video.compress" | "pdf.compress" | "audio.compress" => format!("Compressed to {label}"),
         "audio.trim" => "Trimmed silence".into(),
         "audio.normalize" => "Normalized loudness".into(),
         "video.mp3" | "video.wav" => format!("Extracted audio as {label}"),
@@ -123,7 +112,7 @@ pub fn start(
     wait_for_dialog: Option<isize>,
     size: Option<crate::size::Ask>,
 ) -> u64 {
-    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    let id = crate::engine::new_id();
     std::thread::spawn(move || {
         crate::procs::set_current_job(id);
         report_downloads(&app, id);
@@ -134,7 +123,7 @@ pub fn start(
         if !ring {
             crate::show_hud(&app);
         }
-        emit(&app, "job-started", Started { id, title, family, ring });
+        emit(&app, "job-started", Started { id, title, family, ring, via: None });
 
         // From a Save dialog: the app hasn't written the file yet.
         if let Some(dialog) = wait_for_dialog {
@@ -170,8 +159,10 @@ pub fn start(
 
         let total = steps.len();
         let started = Instant::now();
-        let (made, errors, cancelled) = run_steps(&app, id, &steps);
-        notes.extend(convert::take_notes(id));
+        let outcome = run_steps(&app, id, &steps);
+        let errors = outcome.errors();
+        let (made, cancelled) = (outcome.made, outcome.cancelled);
+        notes.extend(outcome.notes);
         log::info!("job {id}: {} made, {} failed, {:?}", made.len(), errors.len(), started.elapsed());
 
         let size: u64 = made.iter().map(|p| disk_size(p)).sum();
@@ -233,9 +224,9 @@ pub fn start(
                 }
             }
             let attention = fix.is_some() || body.contains('\n');
-            Done { id, ok: true, title: done_title(&target_id, &label), body, can_undo: true, attention, fix, report, compare }
+            Done { id, ok: true, title: done_title(&target_id, &label), body, can_undo: true, attention, fix, report, compare, via: None }
         };
-        if let Ok(mut o) = outputs().lock() {
+        if let Ok(mut o) = outputs_map().lock() {
             o.insert(id, made);
         }
         emit(&app, "job-done", done);
@@ -317,9 +308,9 @@ fn wait_for_save(app: &AppHandle, id: u64, dialog: isize, files: &[PathBuf]) -> 
 
 /// A file saved by the PDF editor: shown as a done card with Open folder and Undo.
 pub fn saved(app: &AppHandle, path: PathBuf) -> u64 {
-    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    let id = crate::engine::new_id();
     let body = format!("{} · {}", file_name(&path), human_size(disk_size(&path)));
-    if let Ok(mut o) = outputs().lock() {
+    if let Ok(mut o) = outputs_map().lock() {
         o.insert(id, vec![path]);
     }
     crate::show_hud(app);
@@ -341,104 +332,54 @@ fn report_downloads(app: &AppHandle, id: u64) {
     });
 }
 
-/// How many files of one pick convert at the same time. Videos and Office
-/// documents go one by one (each already uses the whole machine, or can't
-/// share LibreOffice); pictures, audio and PDFs use about half the cores.
-fn parallel_for(steps: &[convert::Step]) -> usize {
-    let one_at_a_time = steps.iter().any(|s| {
-        matches!(s.op, convert::Op::Video { .. } | convert::Op::Office { .. } | convert::Op::OfficeThenPandoc { .. } | convert::Op::PandocThenOffice { .. })
+/// Runs the steps through the engine, sending progress and downloads to the ring and the card.
+fn run_steps(app: &AppHandle, id: u64, steps: &[convert::Step]) -> crate::engine::Outcome {
+    let a = app.clone();
+    let sink: crate::engine::Sink = std::sync::Arc::new(move |e| match e {
+        crate::engine::Event::Progress { fraction, detail } | crate::engine::Event::Download { fraction, detail } => {
+            emit(&a, "job-progress", Progress { id, fraction, detail })
+        }
+        crate::engine::Event::StepDone { .. } => {}
     });
-    if one_at_a_time {
-        return 1;
-    }
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
-    (cores / 2).clamp(1, 4).min(steps.len().max(1))
+    crate::engine::run_steps(id, steps, None, &sink)
 }
 
-/// Runs the steps (several at once when they allow it) and returns what was
-/// made, in the order of the steps, the errors, and whether it was cancelled.
-fn run_steps(app: &AppHandle, id: u64, steps: &[convert::Step]) -> (Vec<PathBuf>, Vec<String>, bool) {
-    let total = steps.len();
-    let workers = parallel_for(steps);
-    let next = AtomicU64::new(0);
-    // Per step: progress 0–1, and the outcome once done.
-    let fractions = Mutex::new(vec![0.0f64; total]);
-    let results: Mutex<Vec<Option<Result<PathBuf, String>>>> = Mutex::new(vec![None; total]);
-    let last_emit = Mutex::new(Instant::now() - Duration::from_secs(1));
-    let report_all = |i: usize, p: f64| {
-        let overall = {
-            let Ok(mut f) = fractions.lock() else { return };
-            f[i] = p;
-            f.iter().sum::<f64>() / total as f64
-        };
-        let Ok(mut last) = last_emit.lock() else { return };
-        if last.elapsed() < Duration::from_millis(80) && p < 1.0 {
-            return;
-        }
-        *last = Instant::now();
-        let detail = if total > 1 {
-            let done = results.lock().map(|r| r.iter().filter(|x| x.is_some()).count()).unwrap_or(0);
-            format!("File {} of {total}", (done + 1).min(total))
-        } else {
-            format!("{}%", (p * 100.0).round() as u32)
-        };
-        emit(app, "job-progress", Progress { id, fraction: overall, detail });
-    };
-    let work = || loop {
-        if crate::procs::is_cancelled(id) {
-            break;
-        }
-        let i = next.fetch_add(1, Ordering::SeqCst) as usize;
-        let Some(step) = steps.get(i) else { break };
-        log::info!("job {id}: {} ({} input(s))", step.inputs[0].display(), step.inputs.len());
-        report_all(i, 0.0);
-        let r = convert::run(step, &mut |p| report_all(i, p));
-        if let Ok(mut all) = results.lock() {
-            all[i] = Some(r);
-        }
-    };
-    if workers <= 1 {
-        work();
-    } else {
-        std::thread::scope(|scope| {
-            for _ in 0..workers {
-                scope.spawn(|| {
-                    crate::procs::set_current_job(id);
-                    report_downloads(app, id);
-                    work();
-                });
-            }
-        });
-    }
-
-    let mut made = Vec::new();
-    let mut errors = Vec::new();
-    let mut cancelled = crate::procs::is_cancelled(id);
-    for (step, r) in steps.iter().zip(results.into_inner().unwrap_or_default()) {
-        match r {
-            Some(Ok(output)) => {
-                log::info!("job {id}: made {}", output.display());
-                made.push(output);
-            }
-            Some(Err(e)) if e == crate::procs::CANCELLED => cancelled = true,
-            Some(Err(e)) => {
-                log::warn!("job {id}: failed on {}: {e}", step.inputs[0].display());
-                errors.push(format!("{}: {e}", file_name(&step.inputs[0])));
-            }
-            None => {}
-        }
-    }
-    (made, errors, cancelled)
-}
-
-/// Stops a running job (the corner card's Cancel).
+/// Stops a running job (the corner card's Cancel). An AI app's job runs in
+/// the MCP server's process: it's asked through a file it watches.
 pub fn cancel(id: u64) {
+    if id >= 1 << 40 {
+        if let Some(dir) = crate::mcp::ai_dir().map(|d| d.join("cancel")) {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join(id.to_string()), b"");
+        }
+        return;
+    }
     crate::procs::cancel(id);
+}
+
+// ---------- jobs an AI app runs through MCP (see ai.rs) ----------
+
+pub fn ai_started(app: &AppHandle, id: u64, title: String, via: String) {
+    crate::show_hud(app);
+    emit(app, "job-started", Started { id, title, family: "ai".into(), ring: false, via: Some(via) });
+}
+
+pub fn ai_progress(app: &AppHandle, id: u64, fraction: f64, detail: String) {
+    emit(app, "job-progress", Progress { id, fraction, detail });
+}
+
+pub fn ai_done(app: &AppHandle, id: u64, ok: bool, title: String, body: String, outputs: Vec<PathBuf>, via: Option<String>) {
+    let can_undo = ok && !outputs.is_empty();
+    if let Ok(mut o) = outputs_map().lock() {
+        o.insert(id, outputs);
+    }
+    crate::show_hud(app);
+    emit(app, "job-done", Done { via, ..Done::plain(id, ok, title, body, can_undo) });
 }
 
 /// Shows the first output of a job selected in Explorer / Finder.
 pub fn reveal(id: u64) -> Result<(), String> {
-    let first = outputs()
+    let first = outputs_map()
         .lock()
         .ok()
         .and_then(|o| o.get(&id).and_then(|v| v.first().cloned()))
@@ -464,7 +405,7 @@ pub fn reveal(id: u64) -> Result<(), String> {
 
 /// Moves a job's outputs to the Recycle Bin / Trash.
 pub fn undo(id: u64) -> Result<usize, String> {
-    let files = outputs().lock().ok().and_then(|mut o| o.remove(&id)).unwrap_or_default();
+    let files = outputs_map().lock().ok().and_then(|mut o| o.remove(&id)).unwrap_or_default();
     let existing: Vec<&PathBuf> = files.iter().filter(|p| p.exists()).collect();
     if existing.is_empty() {
         return Ok(0);
@@ -472,15 +413,4 @@ pub fn undo(id: u64) -> Result<usize, String> {
     trash::delete_all(&existing).map_err(|e| format!("Couldn't move to the Recycle Bin: {e}"))?;
     log::info!("job {id}: undone, {} file(s) moved to the bin", existing.len());
     Ok(existing.len())
-}
-
-/// Size of a file, or of everything inside a folder.
-fn disk_size(p: &std::path::Path) -> u64 {
-    match p.metadata() {
-        Ok(m) if m.is_dir() => std::fs::read_dir(p)
-            .map(|rd| rd.flatten().map(|e| disk_size(&e.path())).sum())
-            .unwrap_or(0),
-        Ok(m) => m.len(),
-        Err(_) => 0,
-    }
 }

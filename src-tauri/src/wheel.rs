@@ -352,7 +352,9 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
 
     let first = fam(fam_ids[0]);
     let (hub_title, hub_subtitle) = if files.len() == 1 {
-        (files[0].name.clone(), format!("{} · {}", first.label, human_size(files[0].size)))
+        // A RAW photo shows its megapixels ("RAW photo · 24 MP"), which says more than its size.
+        let sub = (first.id == "raw").then(|| crate::raw::describe(Path::new(&files[0].path))).flatten();
+        (files[0].name.clone(), sub.unwrap_or_else(|| format!("{} · {}", first.label, human_size(files[0].size))))
     } else if fam_ids.len() == 1 {
         (format!("{} files", files.len()), first.label.clone())
     } else {
@@ -411,6 +413,55 @@ pub fn families(prefs: &Settings) -> Vec<FamilyInfo> {
                 .collect(),
         })
         .collect()
+}
+
+// ---------- the format list for the command line and MCP ----------
+
+/// A conversion, as the command line and MCP list it.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Conversion {
+    /// The slot id ("image.jpg").
+    pub id: String,
+    /// What to type after --to ("jpg", "compress", "720p").
+    pub name: String,
+    pub label: String,
+    pub hint: String,
+    /// Needs two or more files (Merge).
+    pub multi: bool,
+}
+
+/// The name to type for a target: its output format, else the part after the dot.
+fn short_name(t: &Target) -> String {
+    match (&t.ext, t.action) {
+        (Some(e), false) => canonical(e),
+        _ => t.id.split_once('.').map(|(_, n)| n.to_string()).unwrap_or_else(|| t.id.clone()),
+    }
+}
+
+/// Family (id, label) of a file extension.
+pub fn family_of(ext: &str) -> Option<(String, String)> {
+    let ext = ext.to_lowercase();
+    registry().families.iter().find(|f| f.extensions.iter().any(|e| *e == ext)).map(|f| (f.id.clone(), f.label.clone()))
+}
+
+/// What a file with this extension can become (no window-only actions such as the PDF editor).
+pub fn conversions_for(ext: &str) -> Vec<Conversion> {
+    let ext = ext.to_lowercase();
+    let Some(fam) = registry().families.iter().find(|f| f.extensions.iter().any(|e| *e == ext)) else { return Vec::new() };
+    fam.targets
+        .iter()
+        .chain(fam.more.iter())
+        .filter(|t| t.id != "pdf.edit" && t.applies_to_ext(&ext))
+        .map(|t| Conversion { id: t.id.clone(), name: short_name(t), label: t.label.clone(), hint: t.hint.clone(), multi: t.multi })
+        .collect()
+}
+
+/// The target a typed name means for a file with this extension ("jpeg",
+/// "JPG", "image.jpg" and "Compress" all work), or None.
+pub fn resolve(word: &str, ext: &str) -> Option<Conversion> {
+    let w = canonical(&word.trim().trim_start_matches('.').to_lowercase());
+    conversions_for(ext).into_iter().find(|c| c.id == w || c.name == w || c.label.to_lowercase() == w)
 }
 
 #[cfg(test)]

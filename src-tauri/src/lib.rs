@@ -10,16 +10,23 @@
 //! the converters; the "main" window is an activity log for testing.
 
 mod accent;
+mod ai;
 mod archive;
+mod cli;
 mod compare;
+mod connect;
 mod convert;
 mod data;
+mod engine;
 mod install;
 mod jobs;
 mod look;
+mod mcp;
 mod procs;
+mod raw;
 mod report;
 mod settings;
+mod shell;
 mod size;
 mod tools;
 mod update;
@@ -741,7 +748,7 @@ fn open_logs(app: AppHandle) -> Result<(), String> {
     open_in_file_manager(&dir)
 }
 
-fn open_in_file_manager(dir: &std::path::Path) -> Result<(), String> {
+pub(crate) fn open_in_file_manager(dir: &std::path::Path) -> Result<(), String> {
     let program = if cfg!(windows) { "explorer.exe" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     std::process::Command::new(program).arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
@@ -751,6 +758,7 @@ const LINKS: &[&str] = &[
     "https://github.com/sponsors/sanyamgoelx",
     "https://github.com/sanyamgoelx/convertino",
     "https://github.com/sanyamgoelx/convertino/releases",
+    "https://github.com/sanyamgoelx/convertino#command-line",
 ];
 
 /// Opens one of `LINKS` in the default browser.
@@ -1277,6 +1285,11 @@ fn show_main(app: &AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// The `convertino` command (src/bin/convertino-cli.rs). Returns the exit code.
+pub fn cli_main() -> i32 {
+    cli::main()
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(
@@ -1329,6 +1342,12 @@ pub fn run() {
             editor_close,
             job_reveal,
             job_cancel,
+            ai::ai_status,
+            ai::ai_connect,
+            ai::ai_setup_snippet,
+            ai::command_install,
+            ai::ai_jobs_clear,
+            ai::ai_open_folder,
             job_undo,
             hud_resize
         ])
@@ -1344,6 +1363,8 @@ pub fn run() {
             alt_click::ENABLED.store(prefs.alt_click, Ordering::SeqCst);
             // Keeps the startup entry pointing at this copy of Convertino (it may have moved).
             settings::apply_start_at_login(prefs.start_at_login);
+            // Corner cards for AI apps' jobs; connected AI apps follow this copy if it moved.
+            ai::start(app.handle().clone());
             // Settings moved to the FFmpeg build with x264/x265: swap an older copy in the background.
             if install::ffmpeg_build_differs() {
                 std::thread::spawn(|| match install::match_ffmpeg_build() {

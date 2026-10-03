@@ -69,6 +69,8 @@ pub enum Op {
     Extract,
     /// Unpack and pack again in another format.
     Repack { to: archive::Pack },
+    /// Camera JPG: the picture the camera stored inside a RAW file.
+    CameraJpg { level: Option<Level>, fixed: u32 },
     /// Compress to a size (None: the smallest that still looks the same).
     ToSize { kind: size::Kind, bytes: Option<u64>, trim: Option<f64> },
 }
@@ -250,7 +252,14 @@ fn plan_plain(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<Ste
 
     let steps = match target_id {
         // ---------- images ----------
-        "image.jpg" => each("jpg", None, None, picture([flatten(), fit()].concat(), Lossy::Jpg, q.jpg)),
+        "image.jpg" | "raw.jpg" => each("jpg", None, None, picture([flatten(), fit()].concat(), Lossy::Jpg, q.jpg)),
+        // ---------- RAW photos (developed first, see raw.rs) ----------
+        // PNG and AVIF in 8 bits (16 would make them several times bigger); TIFF keeps 16 for editing.
+        "raw.png" => each("png", None, None, png([fit(), s(&["-depth", "8"])].concat())),
+        "raw.webp" => each("webp", None, None, picture(fit(), Lossy::Webp, q.webp)),
+        "raw.avif" => each("avif", None, None, picture([fit(), s(&["-depth", "8"])].concat(), Lossy::Avif, 60)),
+        "raw.tiff" => each("tiff", None, None, magick([fit(), s(&["-depth", "16", "-compress", "zip", "-units", "PixelsPerInch", "-density", "300"])].concat(), true)),
+        "raw.camera-jpg" => each("jpg", None, None, Op::CameraJpg { level, fixed: q.jpg }),
         "image.png" => each("png", None, None, png(fit())),
         "image.webp" => each("webp", None, None, picture(fit(), Lossy::Webp, q.webp)),
         "image.avif" => each("avif", None, None, picture(fit(), Lossy::Avif, 60)),
@@ -263,10 +272,12 @@ fn plan_plain(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<Ste
             None,
             magick(s(&["-background", "none", "-define", "icon:auto-resize=256,128,64,48,32,16"]), true),
         ),
-        "image.pdf" => {
+        "image.pdf" | "raw.pdf" => {
             let (dir, stem, _) = split(&files[0]);
-            let stem = if files.len() == 1 { stem } else { "Combined images".to_string() };
-            vec![Step { inputs: files.to_vec(), dir, stem, ext: "pdf".into(), folder: false, op: magick(fit(), false) }]
+            let stem = if files.len() == 1 { stem } else if target_id == "raw.pdf" { "Combined photos".to_string() } else { "Combined images".to_string() };
+            // Photos go in as JPEG pages: a developed RAW is 16-bit and would make a huge PDF.
+            let args = if target_id == "raw.pdf" { [fit(), s(&["-depth", "8", "-compress", "jpeg", "-quality", "92"])].concat() } else { fit() };
+            vec![Step { inputs: files.to_vec(), dir, stem, ext: "pdf".into(), folder: false, op: magick(args, false) }]
         }
 
         // ---------- audio, and audio out of video ----------
@@ -401,6 +412,16 @@ fn not_yet(target_id: &str) -> String {
 
 // ---------- output names ----------
 
+thread_local! {
+    /// A folder the command line or MCP asked for (`--out`), for jobs on this thread.
+    static OUT_OVERRIDE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Saves this thread's conversions in `dir` (None: next to the originals, or the Settings folder).
+pub fn set_out_override(dir: Option<PathBuf>) {
+    OUT_OVERRIDE.with(|o| *o.borrow_mut() = dir);
+}
+
 /// A path in `dir` that doesn't exist yet: "name.ext", then "name (1).ext"
 /// on Windows or "name 2.ext" on Mac, matching each OS's own copies.
 /// An empty `ext` names a folder.
@@ -460,6 +481,10 @@ impl Drop for Reserved {
 /// Where a conversion of a file in `dir` is saved: there, or the one folder
 /// chosen in Settings; a read-only place falls back to Downloads.
 pub(crate) fn output_dir(dir: &Path) -> PathBuf {
+    if let Some(folder) = OUT_OVERRIDE.with(|o| o.borrow().clone()) {
+        let _ = std::fs::create_dir_all(&folder);
+        return writable_dir(&folder);
+    }
     match crate::settings::get().output_folder() {
         Some(folder) if std::fs::create_dir_all(&folder).is_ok() => writable_dir(&folder),
         Some(folder) => {
@@ -756,7 +781,11 @@ pub fn run(step: &Step, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String
     if step.folder {
         std::fs::create_dir_all(&output).map_err(|e| format!("Couldn't create {}: {e}", output.display()))?;
     }
-    let result = run_op(step, &output, progress);
+    let result = if step.inputs.iter().any(|p| crate::raw::is_raw(p)) && !matches!(step.op, Op::CameraJpg { .. }) {
+        crate::raw::run_developed(step, &output, progress, run_op)
+    } else {
+        run_op(step, &output, progress)
+    };
     // Cancelled while the tool was finishing: treat it as cancelled all the same.
     let result = if result.is_ok() && procs::cancelled_here() { Err(procs::CANCELLED.to_string()) } else { result };
     let result = match (result, &staging) {
@@ -819,6 +848,7 @@ fn run_op(step: &Step, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<P
             run_ffmpeg(input, &all, output, progress)?;
             Ok(output.to_path_buf())
         }
+        Op::CameraJpg { level, fixed } => crate::raw::camera_jpg(input, output, *level, *fixed, progress),
         Op::Picture { prep, format, level, fixed } => {
             progress(0.1);
             let q = look::picture(input, prep, *format, *level, *fixed, output)?;

@@ -284,6 +284,94 @@
       ]
     },
     {
+      "id": "raw",
+      "label": "RAW photo",
+      "color": "#0E7C86",
+      "extensions": [
+        "dng",
+        "cr2",
+        "cr3",
+        "crw",
+        "nef",
+        "nrw",
+        "arw",
+        "srf",
+        "sr2",
+        "raf",
+        "orf",
+        "rw2",
+        "pef",
+        "srw",
+        "x3f",
+        "3fr",
+        "iiq",
+        "rwl",
+        "erf",
+        "kdc",
+        "dcr",
+        "mos",
+        "mrw"
+      ],
+      "targets": [
+        {
+          "id": "raw.jpg",
+          "label": "JPG",
+          "icon": "image",
+          "ext": "jpg",
+          "hint": "Camera's white balance · keeps EXIF and GPS"
+        },
+        {
+          "id": "raw.png",
+          "label": "PNG",
+          "icon": "image",
+          "ext": "png",
+          "hint": "Lossless · keeps EXIF"
+        },
+        {
+          "id": "raw.tiff",
+          "label": "TIFF",
+          "icon": "image",
+          "ext": "tiff",
+          "hint": "16-bit · for editing and print"
+        },
+        {
+          "id": "raw.avif",
+          "label": "AVIF",
+          "icon": "image",
+          "ext": "avif",
+          "hint": "Smallest file · modern browsers"
+        },
+        {
+          "id": "raw.compress",
+          "label": "Compress",
+          "icon": "compress",
+          "action": true,
+          "hint": "Pick a file size · makes a JPG"
+        },
+        {
+          "id": "raw.pdf",
+          "label": "PDF",
+          "icon": "pdf",
+          "ext": "pdf",
+          "hint": "One page per photo · several photos make one PDF"
+        },
+        {
+          "id": "raw.webp",
+          "label": "WEBP",
+          "icon": "image",
+          "ext": "webp",
+          "hint": "Smaller than JPG · for the web"
+        },
+        {
+          "id": "raw.camera-jpg",
+          "label": "Camera JPG",
+          "icon": "camera",
+          "action": true,
+          "hint": "The picture your camera stored inside · instant"
+        }
+      ]
+    },
+    {
       "id": "video",
       "label": "Video",
       "color": "#C4531A",

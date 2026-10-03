@@ -110,6 +110,10 @@ pub struct Settings {
     pub ffmpeg_build: String,
     /// How often each target was picked (for `learn`).
     pub picks: BTreeMap<String, u32>,
+    /// AI apps connected through MCP may convert files.
+    pub ai_apps: bool,
+    /// A corner card shows while an AI app converts.
+    pub ai_card: bool,
     /// Settings format. Files without it are from before version 2.
     #[serde(default)]
     pub version: u32,
@@ -134,6 +138,8 @@ impl Default for Settings {
             quality: Quality::default(),
             ffmpeg_build: "gpl".into(),
             picks: BTreeMap::new(),
+            ai_apps: true,
+            ai_card: true,
             version: VERSION,
         }
     }
@@ -177,11 +183,13 @@ impl Settings {
 struct Store {
     path: Option<PathBuf>,
     value: Settings,
+    /// Loaded by the command line or MCP: never written.
+    read_only: bool,
 }
 
 fn store() -> &'static RwLock<Store> {
     static S: OnceLock<RwLock<Store>> = OnceLock::new();
-    S.get_or_init(|| RwLock::new(Store { path: None, value: Settings::default() }))
+    S.get_or_init(|| RwLock::new(Store { path: None, value: Settings::default(), read_only: false }))
 }
 
 /// Loads settings.json from `dir`. Returns true when there was no file yet
@@ -213,6 +221,43 @@ pub fn init(dir: PathBuf) -> bool {
     first
 }
 
+/// The app's own config folder, the one Tauri's app_config_dir gives the
+/// running app (the command line and the MCP server have no Tauri).
+pub fn default_config_dir() -> Option<PathBuf> {
+    const ID: &str = "com.crofty.convertino";
+    // Tests point the command line at their own settings.
+    if let Some(d) = std::env::var_os("CONVERTINO_CONFIG_DIR").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(d));
+    }
+    if cfg!(windows) {
+        return std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join(ID));
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if cfg!(target_os = "macos") {
+        return home.map(|h| h.join("Library/Application Support").join(ID));
+    }
+    match std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
+        Some(x) => Some(PathBuf::from(x).join(ID)),
+        None => home.map(|h| h.join(".config").join(ID)),
+    }
+}
+
+/// Reads settings.json without ever writing it (command line, MCP server):
+/// a first run of the app must still see "no settings yet".
+pub fn init_read_only(dir: PathBuf) {
+    let path = dir.join("settings.json");
+    let value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Settings>(&t).ok())
+        .map(|s| s.clamped())
+        .unwrap_or_default();
+    if let Ok(mut s) = store().write() {
+        s.path = Some(path);
+        s.value = value;
+        s.read_only = true;
+    }
+}
+
 /// The folder settings.json lives in (None before `init`, e.g. in tests).
 pub fn config_dir() -> Option<PathBuf> {
     store().read().ok()?.path.as_ref()?.parent().map(PathBuf::from)
@@ -240,6 +285,9 @@ pub fn update(f: impl FnOnce(&mut Settings)) -> Settings {
 fn save() {
     let Ok(s) = store().read() else { return };
     let Some(path) = &s.path else { return };
+    if s.read_only {
+        return;
+    }
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }

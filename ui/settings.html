@@ -159,6 +159,53 @@
       </div>
     </section>
 
+    <!-- ===== AI & CLI ===== -->
+    <section data-page="ai" hidden>
+      <h2 class="perm-head">Command line</h2>
+      <div class="card">
+        <div class="row">
+          <svg class="ic accent" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-5-6-5 M12 19h8"/></svg>
+          <div class="grow">
+            <div>The <b>convertino</b> command</div>
+            <div class="sub" id="cli-sub">Works in PowerShell, Command Prompt and Terminal. Same converters and quality settings as the wheel.</div>
+          </div>
+          <span class="perm-state" id="cli-state"></span>
+          <button type="button" class="btn primary" id="cli-install" hidden>Install command…</button>
+        </div>
+        <div class="code">
+          <pre id="cli-examples">convertino photo.CR3 --to jpg
+convertino *.wav --to mp3
+convertino video.mp4 --size 25MB
+convertino formats report.docx</pre>
+          <button type="button" class="btn" id="cli-copy">Copy</button>
+        </div>
+        <div class="row cli-links">
+          <button type="button" class="link" id="cli-help">All commands and options</button>
+          <span class="sub" id="cli-note">Installed with Convertino · terminals opened before installing need reopening</span>
+        </div>
+      </div>
+
+      <h2 class="perm-head ai-gap">AI apps</h2>
+      <div class="card hero ai-hero">
+        <div class="grow">
+          <div class="big">Let AI apps convert files for you</div>
+          <div class="sub" id="ai-sub">Ask Claude or another AI app to "turn these RAW photos into JPGs" and it uses Convertino on this computer. New files go next to the originals; originals are never changed.</div>
+        </div>
+        <span class="state" data-state-for="aiApps"></span>
+        <button type="button" class="switch" role="switch" data-key="aiApps" aria-label="Let AI apps convert files"><span></span></button>
+      </div>
+      <div class="card list" id="ai-apps"></div>
+      <div class="sub perm-note" id="ai-note">Connect adds Convertino to that app's settings. Restart the app afterwards. Disconnect takes it out again.</div>
+      <div class="card row">
+        <div class="grow"><div id="aicard-title">Show a card while an AI app converts</div><div class="sub" id="aicard-sub">The corner card says which app asked, with Open folder and Undo</div></div>
+        <span class="state" data-state-for="aiCard"></span>
+        <button type="button" class="switch" role="switch" data-key="aiCard" aria-labelledby="aicard-title"><span></span></button>
+      </div>
+
+      <h2 class="perm-head ai-gap">Recent AI jobs</h2>
+      <div class="card list" id="ai-jobs"></div>
+    </section>
+
     <!-- ===== About ===== -->
     <section data-page="about" hidden>
       <div class="card row about">

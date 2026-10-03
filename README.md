@@ -32,6 +32,51 @@ two permissions macOS needs. Open/Save dialogs come next.
 - [Build plan](docs/BUILD-PLAN.md)
 - [Interactive wheel mockup](docs/wheel-mockup.html) (download and open in a browser)
 
+## Camera RAW photos
+
+DNG, CR2/CR3, NEF, ARW, RAF, ORF, RW2, PEF, SRW and other camera RAW files get their
+own wheel: JPG, PNG, TIFF (16-bit), AVIF, WebP, PDF, Compress (to a size) and
+**Camera JPG**, the picture the camera stored inside the RAW (its own look, instant).
+Photos are developed with the camera's white balance and turned the right way up;
+the date, camera, lens, exposure and GPS are copied into the result.
+
+## Command line
+
+The installer adds a `convertino` command (Windows: open a new terminal after
+installing; Mac: **Settings › AI & CLI › Install command…**).
+
+```
+convertino photo.CR3 --to jpg              convert (jpg, png, webp, mp3, mp4, pdf, docx, xlsx, …)
+convertino *.wav --to mp3                  wildcards work in PowerShell and Command Prompt too
+convertino video.mp4 --size 25MB           compress to a size (decimal units: 10MB = 10,000,000 bytes)
+convertino a.jpg b.jpg --size 5MB --together
+convertino report.docx --to pdf --out D:\Converted
+convertino formats photo.CR3               what a file can become
+convertino tools                           which converters are ready (tools install --all to fetch them now)
+```
+
+Options: `--quality small|balanced|best`, `--json` (one JSON result for scripts),
+`--quiet`. Results go next to the originals (or `--out`); originals are never changed
+and existing files are never overwritten. Exit codes: 0 done, 1 some files failed,
+2 the command was wrong, 130 cancelled with Ctrl+C.
+
+## AI apps (MCP)
+
+Convertino is also an [MCP](https://modelcontextprotocol.io) server, so AI apps can
+convert files for you ("turn these RAW photos into JPGs", "make this video fit in
+25 MB"). In **Settings › AI & CLI**, click **Connect** next to Claude Desktop, Claude
+Code or Cursor, then restart that app. For any other MCP app, **Copy setup** gives
+the entry to paste:
+
+```json
+{ "mcpServers": { "convertino": { "command": "<path to convertino>", "args": ["mcp"] } } }
+```
+
+Tools: `list_conversions`, `convert`, `compress_to_size`, `converters_status`.
+Same rules as the wheel (originals untouched, nothing overwritten); while an AI app
+converts, the corner card shows which app asked, with Open folder and Undo. A switch
+in Settings turns AI access off.
+
 ## Support
 
 Convertino is free. If it saves you time, you can support its development through
@@ -59,6 +104,22 @@ isn't code-signed yet; see `docs/SIGNING.md`).
    `src-tauri/Cargo.toml`), then double-click **`release.cmd`**. It pushes the code and
    the tag `v<version>`; GitHub builds Windows and both Macs and publishes the release
    with `latest.json` for the updater.
+
+What has to pass before and after a release:
+
+- **Before tagging:** `release.cmd` waits for the Build run of the commit it pushed and
+  refuses to tag unless it passed. That run tests on Windows and Apple silicon (unit
+  tests; real conversions with downloaded converters and public-domain RAW samples;
+  the `convertino` command and its MCP server end to end), builds the installers, then
+  **installs them** like a person would: Windows over the previous release, the
+  command on PATH in a new terminal, conversions, the MCP server through the official
+  MCP Inspector, then a clean uninstall; Mac from the .dmg, through a
+  `/usr/local/bin` link, with the bundled converters.
+- **Test releases first:** a version like `0.2.0-rc.1` is published as a pre-release.
+  Installed copies and the Download link follow "latest", which skips pre-releases.
+- **After publishing:** the "Release check" run downloads the published files and
+  installs them again on Windows and both Macs, and checks that every file in
+  `latest.json` downloads and its signature verifies with the updater key.
 
 ## Try the spike
 

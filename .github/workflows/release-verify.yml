@@ -1,0 +1,89 @@
+# Checks a published release the way people get it: downloads the installers
+# from the release page, installs them (Windows: over the previous release,
+# then uninstalls), converts files with the `convertino` command, talks to the
+# MCP server with the official MCP Inspector, and checks that latest.json
+# (what installed copies update from) points at files whose signatures verify.
+# Runs after every Release; can also be started by hand for any tag.
+name: Release check
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.2.0"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  latest-json:
+    runs-on: ubuntu-latest
+    name: updater files
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign jq
+      - name: latest.json and signatures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ci/verify-latest-json.sh "${{ inputs.tag }}"
+
+  windows:
+    runs-on: windows-latest
+    name: install windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Download the release and the one before it
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern '*-setup.exe' --dir new
+          prev="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-pre-releases --limit 10 --json tagName --jq '.[].tagName' | grep -vx "${{ inputs.tag }}" | head -1 || true)"
+          if [ -n "$prev" ]; then gh release download "$prev" --repo "$GITHUB_REPOSITORY" --pattern '*-setup.exe' --dir previous; fi
+      - name: Install over the previous release, use, uninstall
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag }}"
+          $setup = Get-ChildItem new -Filter *-setup.exe | Select-Object -First 1
+          $prev = Get-ChildItem previous -Filter *-setup.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          $opts = @{ Installer = $setup.FullName; Version = $tag.TrimStart("v") }
+          if ($prev) { $opts.Previous = $prev.FullName }
+          & ci/verify-install-windows.ps1 @opts
+
+  mac:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: apple-silicon
+            os: macos-14
+            dmg: "*_aarch64.dmg"
+          - name: intel
+            os: macos-15-intel
+            dmg: "*_x64.dmg"
+    runs-on: ${{ matrix.os }}
+    name: install mac ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Download the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern '${{ matrix.dmg }}' --dir new
+      - name: Install and use
+        run: |
+          tag="${{ inputs.tag }}"
+          bash ci/verify-install-mac.sh "$(ls new/*.dmg | head -1)" "${tag#v}"

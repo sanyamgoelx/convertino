@@ -112,7 +112,9 @@ fn exe(name: &str) -> String {
 
 fn tool_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    if let Ok(me) = std::env::current_exe() {
+    // Resolved, so the command started through a link (/usr/local/bin/convertino
+    // on a Mac) still finds the converters inside the app.
+    if let Ok(me) = std::env::current_exe().and_then(std::fs::canonicalize).map(|p| crate::cli::strip_verbatim(&p)) {
         if let Some(dir) = me.parent() {
             dirs.push(dir.join("tools"));
             // macOS app bundle: Contents/MacOS/convertino -> Contents/Resources/tools

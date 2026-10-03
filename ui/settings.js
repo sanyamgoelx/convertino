@@ -10,6 +10,7 @@ const NAV = [
   { id: "wheel", label: "Wheel", icon: "M12 3a9 9 0 100 18 9 9 0 000-18z M12 8.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z M12 3v5.5 M12 15.5V21 M3 12h5.5 M15.5 12H21" },
   { id: "quality", label: "Quality", icon: "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6" },
   { id: "converters", label: "Converters", icon: "M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.8-3.8a6 6 0 01-7.9 7.9l-6.9 6.9a2.1 2.1 0 01-3-3l6.9-6.9a6 6 0 017.9-7.9z" },
+  { id: "ai", label: "AI & CLI", icon: "M4 17l6-5-6-5 M12 19h8" },
   { id: "about", label: "About", icon: "M12 3a9 9 0 100 18 9 9 0 000-18z M12 16v-4 M12 8h.01" },
 ];
 const WARN = "M12 3l10 18H2z M12 10v5 M12 18h.01";
@@ -40,6 +41,9 @@ const LICENCES = [
   ["Convertino", "GNU GPL 3.0 or later"],
   ["FFmpeg", "GNU LGPL 2.1 or later (the x264/x265 build: GNU GPL 2.0 or later)"],
   ["ImageMagick", "ImageMagick License (Apache 2.0 style)"],
+  ["LibRaw (inside ImageMagick, for RAW photos)", "GNU LGPL 2.1 or CDDL 1.0"],
+  ["rawler (RAW photo details and camera pictures)", "GNU LGPL 2.1"],
+  ["little_exif, image (EXIF and picture files)", "MIT or Apache 2.0"],
   ["Poppler", "GNU GPL 2.0 or 3.0"],
   ["Ghostscript", "GNU AGPL 3.0"],
   ["Pandoc", "GNU GPL 2.0 or later"],
@@ -204,6 +208,7 @@ function setPage(p) {
   render();
   $("main").scrollTop = 0;
   if (p === "converters") refreshTools();
+  if (p === "ai") refreshAi();
 }
 
 function render() {
@@ -664,6 +669,106 @@ function toast(text) {
   setTimeout(() => t.remove(), 3500);
 }
 
+// ---------- AI & CLI ----------
+
+let ai = null;
+const APP_ICON = { "claude-desktop": "M4 5h16v14H4z M4 9h16", "claude-code": "M8 8l-4 4 4 4 M16 8l4 4-4 4", cursor: "M8 8l-4 4 4 4 M16 8l4 4-4 4" };
+
+function ago(ms) {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 2 * 86400) return "yesterday";
+  return new Date(ms).toLocaleDateString();
+}
+
+async function refreshAi() {
+  try { ai = await invoke("ai_status"); } catch (e) { ai = null; }
+  renderAi();
+}
+
+function renderAi() {
+  if (!ai) return;
+  const mac = isMac();
+  const c = ai.command;
+  const st = $("cli-state");
+  st.className = "perm-state " + (c.installed ? "ok" : "todo");
+  st.innerHTML = c.installed
+    ? `<svg class="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="${OK}"/></svg>Ready`
+    : (c.path ? "Not installed" : "Not in this copy");
+  $("cli-install").hidden = !(mac && c.canInstall && !c.installed);
+  if (mac) {
+    $("cli-sub").textContent = c.installed ? "Works in Terminal. Same converters and quality settings as the wheel." : "Adds it to /usr/local/bin so Terminal finds it. macOS asks for your password once.";
+    $("cli-note").textContent = c.installed ? "Linked to the command inside Convertino" : "";
+  } else if (!c.installed) {
+    $("cli-note").textContent = view && view.dev ? "Development build: the installer adds the command" : "Reinstall Convertino to add the command";
+  }
+
+  $("ai-apps").innerHTML = ai.apps.map((a) => {
+    const state = a.connected && !a.outdated ? `<span class="perm-state ok"><svg class="ic sm" viewBox="0 0 24 24" aria-hidden="true"><path d="${OK}"/></svg>Connected</span>` : "";
+    const sub = a.connected ? (a.outdated ? "Points at an older copy of Convertino" : (a.id === "claude-desktop" ? "Also used by Cowork on this computer" : "Restart it if it was open")) : (a.found ? `Found on this ${mac ? "Mac" : "PC"}` : "Not installed");
+    const btn = a.connected && !a.outdated
+      ? `<button type="button" class="btn wide" data-app="${a.id}" data-on="0">Disconnect</button>`
+      : `<button type="button" class="btn wide${a.found ? " primary" : ""}" data-app="${a.id}" data-on="1"${a.found ? "" : " disabled"}>${a.outdated ? "Update" : "Connect"}</button>`;
+    return `<div class="item${a.found ? "" : " off"}"><span class="app-ic"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${APP_ICON[a.id] || APP_ICON["claude-desktop"]}"/></svg></span>` +
+      `<div class="grow"><div class="name">${esc(a.name)}</div><div class="sub">${esc(sub)}</div></div>${state}${btn}</div>`;
+  }).join("") +
+    `<div class="item"><span class="app-ic"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 9h10v10H9z M5 15V5h10"/></svg></span>` +
+    `<div class="grow"><div class="name">Another app</div><div class="sub">Paste the setup into its MCP settings</div></div>` +
+    `<button type="button" class="btn wide" id="ai-copy">Copy setup</button></div>`;
+  if (mac) {
+    $("ai-note").textContent = "Connect adds Convertino to that app's settings. Quit and reopen the app afterwards.";
+    $("aicard-sub").textContent = "The top-right card says which app asked, with Show in Finder and Undo";
+    $("ai-sub").textContent = $("ai-sub").textContent.replace("this computer", "your Mac");
+  }
+
+  const jobs = ai.jobs || [];
+  $("ai-jobs").innerHTML = jobs.length
+    ? jobs.map((j, i) => `<div class="item"><div class="grow"><div>${esc(j.what)}</div><div class="sub">${esc(j.client)} · ${ago(j.at)}${j.folder ? " · " + esc(j.folder.split(/[\\/]/).pop()) : ""}</div></div>` +
+        `<span class="perm-state ${j.ok ? "ok" : "todo"}">${esc(j.state)}</span>` +
+        (j.folder ? `<button type="button" class="link" data-job="${i}">Show</button>` : "") + `</div>`).join("") +
+      `<div class="item"><span class="grow sub">Kept on this computer only</span><button type="button" class="btn" id="ai-clear">Clear</button></div>`
+    : `<div class="sub ai-empty">Nothing yet. Jobs an AI app asks for show here.</div>`;
+}
+
+$("ai-apps").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-app]");
+  if (b) {
+    b.disabled = true;
+    b.textContent = b.dataset.on === "1" ? "Connecting…" : "Disconnecting…";
+    try {
+      ai = await invoke("ai_connect", { id: b.dataset.app, on: b.dataset.on === "1" });
+      renderAi();
+      toast(b.dataset.on === "1" ? "Connected. Restart the app to use Convertino there." : "Disconnected.");
+    } catch (err) {
+      toast(String(err));
+      refreshAi();
+    }
+    return;
+  }
+  if (e.target.closest("#ai-copy")) {
+    const text = await invoke("ai_setup_snippet");
+    try { await navigator.clipboard.writeText(text); toast("Setup copied."); } catch (_) { toast(text); }
+  }
+});
+$("ai-jobs").addEventListener("click", async (e) => {
+  const s = e.target.closest("[data-job]");
+  if (s) { const j = ai.jobs[Number(s.dataset.job)]; if (j && j.folder) invoke("ai_open_folder", { path: j.folder }).catch((err) => toast(String(err))); }
+  if (e.target.closest("#ai-clear")) { await invoke("ai_jobs_clear"); refreshAi(); }
+});
+$("cli-copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("cli-examples").textContent); toast("Copied."); } catch (_) {}
+});
+$("cli-help").addEventListener("click", () => invoke("open_link", { url: "https://github.com/sanyamgoelx/convertino#command-line" }).catch(() => {}));
+$("cli-install").addEventListener("click", async () => {
+  const b = $("cli-install");
+  b.disabled = true;
+  try { ai = await invoke("command_install"); renderAi(); toast("Installed. Open a new Terminal window to use it."); }
+  catch (err) { if (String(err) !== "Cancelled.") toast(String(err)); }
+  b.disabled = false;
+});
+
 // ---------- start ----------
 
 async function load() {
@@ -703,7 +808,7 @@ function demoInvoke(cmd, args) {
   const d = (window.__demo = window.__demo || {
     settings: {
       shortcut: "ctrl+alt+shift+KeyC", altClick: true, startAtLogin: true, progressRing: true, saveMode: "next", saveFolder: null,
-      handoffSeconds: 2, learn: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {},
+      handoffSeconds: 2, learn: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {}, aiApps: true, aiCard: true,
     },
     shortcut: "ctrl+alt+shift+KeyC",
     families: [
@@ -739,6 +844,22 @@ function demoInvoke(cmd, args) {
     case "converters_check": return Promise.resolve(["ffmpeg"]);
     case "converters_remove": d.tools.forEach((t) => { if (t.state === "ready") { t.state = "missing"; t.sizeMb = 0; } }); return Promise.resolve(163);
     case "choose_folder": return Promise.resolve("D:\\Converted");
+    case "ai_status": return Promise.resolve(d.ai || (d.ai = {
+      command: { installed: !new URLSearchParams(location.search).get("os"), path: "C:\\Users\\you\\AppData\\Local\\Convertino\\bin\\convertino.exe", canInstall: true },
+      apps: [
+        { id: "claude-desktop", name: "Claude Desktop", found: true, connected: true, outdated: false },
+        { id: "claude-code", name: "Claude Code", found: true, connected: false, outdated: false },
+        { id: "cursor", name: "Cursor", found: false, connected: false, outdated: false },
+      ],
+      jobs: [
+        { at: Date.now() - 180000, client: "Claude Desktop", what: "12 files → jpg", ok: true, state: "Done", folder: "C:\\Users\\you\\Pictures\\Goa" },
+        { at: Date.now() - 3600000, client: "Claude Code", what: "Contract.pdf → txt", ok: false, state: "This PDF is password-protected.", folder: null },
+      ],
+    }));
+    case "ai_connect": { const a = d.ai.apps.find((x) => x.id === args.id); a.connected = args.on; return Promise.resolve(d.ai); }
+    case "ai_setup_snippet": return Promise.resolve('{ "mcpServers": { "convertino": { "command": "convertino.exe", "args": ["mcp"] } } }');
+    case "command_install": d.ai.command.installed = true; return Promise.resolve(d.ai);
+    case "ai_jobs_clear": d.ai.jobs = []; return Promise.resolve(null);
     case "converter_download": {
       const t = d.tools.find((x) => x.id === args.id);
       let f = 0;

@@ -436,3 +436,34 @@ Function CvFinishLeave
     Call RunMainBinary
   ${EndIf}
 FunctionEnd
+
+; ---------------------------------------------------------------- the `convertino` command
+; The command is a copy of convertino-cli.exe named convertino.exe in its own
+; folder (the app's folder already has a convertino.exe: the windowed app),
+; and that folder goes on the user's PATH. `convertino setup` does the PATH
+; part (src-tauri/src/shell.rs).
+
+!macro NSIS_HOOK_POSTINSTALL
+  CreateDirectory "$INSTDIR\bin"
+  Delete "$INSTDIR\bin\convertino.old.exe"
+  ; An AI app may be running the old command (its MCP server): a running
+  ; program can't be replaced, but it can be renamed out of the way.
+  ${If} ${FileExists} "$INSTDIR\bin\convertino.exe"
+    Rename "$INSTDIR\bin\convertino.exe" "$INSTDIR\bin\convertino.old.exe"
+  ${EndIf}
+  CopyFiles /SILENT "$INSTDIR\convertino-cli.exe" "$INSTDIR\bin\convertino.exe"
+  nsExec::Exec '"$INSTDIR\bin\convertino.exe" setup add "$INSTDIR\bin"'
+  Pop $0
+!macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  ; Removing for good (not as part of an update): take the folder off PATH and
+  ; disconnect AI apps, which would otherwise keep starting a missing command.
+  ${If} $UpdateMode <> 1
+    nsExec::Exec '"$INSTDIR\bin\convertino.exe" setup remove "$INSTDIR\bin"'
+    Pop $0
+  ${EndIf}
+  Delete "$INSTDIR\bin\convertino.exe"
+  Delete "$INSTDIR\bin\convertino.old.exe"
+  RMDir "$INSTDIR\bin"
+!macroend
