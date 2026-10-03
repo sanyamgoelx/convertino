@@ -1211,17 +1211,22 @@ fn download_from(url: &str, expected: Option<u64>, dest: &Path, what: &str, give
             let _ = fs::remove_file(&part);
             return Err(format!("The download of {what} stalled. Try again in a bit."));
         }
-        if let (true, Some(total)) = (give_up_if_slow, expected) {
-            let secs = started.elapsed().as_secs_f64();
-            if total > 100_000_000 && secs > 60.0 {
-                let rate = size as f64 / secs;
-                if rate < 1.0 || (total.saturating_sub(size)) as f64 / rate > 15.0 * 60.0 {
-                    procs::kill_tree(tracked.child().id());
-                    let _ = tracked.child().wait();
-                    let _ = fs::remove_file(&part);
-                    log::warn!("{what}: {url} is too slow ({:.0} KB/s); trying another mirror", rate / 1e3);
-                    return Err(format!("The download of {what} was too slow. Try again in a bit."));
-                }
+        let secs = started.elapsed().as_secs_f64();
+        if give_up_if_slow && secs > 60.0 {
+            let rate = size as f64 / secs;
+            // Size known: more than 15 minutes to go. Unknown (some mirrors don't say):
+            // under 0.5 MB/s, which is over 10 minutes for LibreOffice.
+            let too_slow = match expected {
+                Some(total) if total > 100_000_000 => rate < 1.0 || (total.saturating_sub(size)) as f64 / rate > 15.0 * 60.0,
+                Some(_) => false,
+                None => rate < 500_000.0,
+            };
+            if too_slow {
+                procs::kill_tree(tracked.child().id());
+                let _ = tracked.child().wait();
+                let _ = fs::remove_file(&part);
+                log::warn!("{what}: {url} is too slow ({:.0} KB/s); trying another mirror", rate / 1e3);
+                return Err(format!("The download of {what} was too slow. Try again in a bit."));
             }
         }
         match expected {
