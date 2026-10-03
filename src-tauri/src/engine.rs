@@ -40,12 +40,6 @@ pub enum Event {
 
 pub type Sink = Arc<dyn Fn(Event) + Send + Sync>;
 
-/// A sink that ignores everything (tests).
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn quiet() -> Sink {
-    Arc::new(|_| {})
-}
-
 /// What to convert, and how.
 #[derive(Debug, Clone, Default)]
 pub struct Request {

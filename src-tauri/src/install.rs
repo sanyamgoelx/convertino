@@ -1006,12 +1006,29 @@ fn curl_error(code: Option<i32>, what: &str, raw: &str) -> String {
 
 fn fetch_text(url: &str, what: &str) -> Result<String, String> {
     let mut cmd = curl();
-    cmd.args(["-H", "Accept: application/vnd.github+json"]).arg(url);
+    cmd.args(["-H", "Accept: application/vnd.github+json"]);
+    // CI runners share addresses and hit GitHub's limit for anonymous API calls;
+    // there the workflow provides a token. Installed copies never have one.
+    if url.starts_with("https://api.github.com/") {
+        if let Some(t) = std::env::var("GITHUB_TOKEN").ok().filter(|t| !t.trim().is_empty()) {
+            cmd.arg("-H").arg(format!("Authorization: Bearer {}", t.trim()));
+        }
+    }
+    cmd.arg(url);
     let out = procs::output(&mut cmd, "curl", Some(Duration::from_secs(90)))?;
     if !out.status.success() {
         return Err(curl_error(out.status.code(), what, &String::from_utf8_lossy(&out.stderr)));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The HTTP status a URL ends at (after redirects), from a HEAD request.
+fn http_status(url: &str) -> Option<u16> {
+    let mut cmd = curl();
+    // curl() has -f, which hides the status: -I and -w still report it.
+    cmd.args(["-I", "-o"]).arg(if cfg!(windows) { "NUL" } else { "/dev/null" }).args(["-w", "%{http_code}"]).arg(url);
+    let out = procs::output(&mut cmd, "curl", Some(Duration::from_secs(60))).ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok().filter(|c| *c > 0)
 }
 
 /// Size the server reports for `url`, following redirects.
@@ -1087,7 +1104,14 @@ fn libreoffice_download(path: &str, dest: &Path, what: &str) -> Result<(), Strin
     let mut last = String::new();
     for base in LIBREOFFICE_MIRRORS {
         let url = format!("{base}{path}");
-        match download(&url, remote_size(&url), dest, what) {
+        // A fresh release reaches the mirrors bit by bit: skip one that doesn't have the file yet.
+        if let Some(code @ (404 | 410)) = http_status(&url) {
+            log::warn!("LibreOffice: {url} isn't there ({code})");
+            last = format!("The download of {what} isn't available right now. Try again later.");
+            continue;
+        }
+        let more_to_try = Some(base) != LIBREOFFICE_MIRRORS.last();
+        match download_from(&url, remote_size(&url), dest, what, more_to_try) {
             Ok(()) => return Ok(()),
             Err(e) if e == procs::CANCELLED => return Err(e),
             Err(e) => {
@@ -1158,6 +1182,13 @@ fn newest_listed_version(page: &str) -> Option<String> {
 }
 
 fn download(url: &str, expected: Option<u64>, dest: &Path, what: &str) -> Result<(), String> {
+    download_from(url, expected, dest, what, false)
+}
+
+/// `give_up_if_slow`: another mirror can be tried, so a big download that would
+/// take more than about 15 minutes at its speed so far stops after a minute.
+fn download_from(url: &str, expected: Option<u64>, dest: &Path, what: &str, give_up_if_slow: bool) -> Result<(), String> {
+    let started = Instant::now();
     let part = dest.with_file_name(format!("{}.part", file_name(dest)));
     let _ = fs::remove_file(&part);
     let mut cmd = curl();
@@ -1179,6 +1210,19 @@ fn download(url: &str, expected: Option<u64>, dest: &Path, what: &str) -> Result
             let _ = tracked.child().wait();
             let _ = fs::remove_file(&part);
             return Err(format!("The download of {what} stalled. Try again in a bit."));
+        }
+        if let (true, Some(total)) = (give_up_if_slow, expected) {
+            let secs = started.elapsed().as_secs_f64();
+            if total > 100_000_000 && secs > 60.0 {
+                let rate = size as f64 / secs;
+                if rate < 1.0 || (total.saturating_sub(size)) as f64 / rate > 15.0 * 60.0 {
+                    procs::kill_tree(tracked.child().id());
+                    let _ = tracked.child().wait();
+                    let _ = fs::remove_file(&part);
+                    log::warn!("{what}: {url} is too slow ({:.0} KB/s); trying another mirror", rate / 1e3);
+                    return Err(format!("The download of {what} was too slow. Try again in a bit."));
+                }
+            }
         }
         match expected {
             Some(total) => report(
@@ -1371,6 +1415,23 @@ mod tests {
     #[test]
     #[ignore]
     fn fetch_tools() {
+        // Warnings (which mirror failed, curl's own error) go to the output too.
+        struct Warn;
+        impl log::Log for Warn {
+            fn enabled(&self, m: &log::Metadata) -> bool {
+                m.level() <= log::Level::Warn
+            }
+            fn log(&self, r: &log::Record) {
+                if self.enabled(r.metadata()) {
+                    println!("    [{}] {}", r.level(), r.args());
+                }
+            }
+            fn flush(&self) {}
+        }
+        static WARN: Warn = Warn;
+        if log::set_logger(&WARN).is_ok() {
+            log::set_max_level(log::LevelFilter::Warn);
+        }
         let last = std::cell::Cell::new(String::new());
         set_reporter(move |_, detail| {
             if detail != last.take() {

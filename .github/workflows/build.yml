@@ -153,44 +153,68 @@ jobs:
       # ---- Mac checks: real conversions with the bundled converters ----
       # On Apple silicon every time; the Intel Mac (a much slower runner) only
       # checks its bundled converters above, unless the run is started by hand.
+      # Downloaded converters (FFmpeg, Pandoc, LibreOffice…) kept for a month, so a
+      # slow or half-updated download mirror doesn't hold up every run.
+      - name: Month (for the downloaded converters)
+        id: dmonth
+        shell: bash
+        run: echo "m=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore downloaded converters
+        id: dl-cache
+        if: runner.os == 'Windows' || matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache/restore@v4
+        with:
+          path: src-tauri/tools
+          key: tools-${{ matrix.name }}-${{ hashFiles('src-tauri/src/install.rs', 'ci/bundle-mac-tools.sh') }}-${{ steps.dmonth.outputs.m }}
+
       - name: Download the other converters (Mac)
+        timeout-minutes: 40
         if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p src-tauri/tools
-          cp -R src-tauri/mac-tools/* src-tauri/tools/
+          cp -R src-tauri/mac-tools/. src-tauri/tools/
           cd src-tauri
           # One retry: download servers have bad moments, which shouldn't fail the build.
           cargo test --lib install::tests::fetch_tools -- --ignored --nocapture \
             || { echo "Retrying the downloads in 30 s"; sleep 30; cargo test --lib install::tests::fetch_tools -- --ignored --nocapture; }
 
+      - name: Keep the downloaded converters (Mac)
+        if: runner.os == 'macOS' && steps.dl-cache.outcome == 'success' && steps.dl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src-tauri/tools
+          key: tools-${{ matrix.name }}-${{ hashFiles('src-tauri/src/install.rs', 'ci/bundle-mac-tools.sh') }}-${{ steps.dmonth.outputs.m }}
+
       - name: Tests with real conversions (Mac)
+        timeout-minutes: 60
         if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch')
         working-directory: src-tauri
         run: cargo test -- --nocapture
 
       # ---- Windows checks: the same tests with real conversions ----
-      - name: Month (for the Windows converter cache)
-        if: runner.os == 'Windows'
-        id: wmonth
-        shell: bash
-        run: echo "m=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
-
-      - name: Cached Windows converters
-        if: runner.os == 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: src-tauri/tools
-          key: win-tools-${{ hashFiles('src-tauri/src/install.rs') }}-${{ steps.wmonth.outputs.m }}
-
       - name: Download the converters (Windows)
+        timeout-minutes: 40
         if: runner.os == 'Windows'
         working-directory: src-tauri
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           cargo test --lib install::tests::fetch_tools -- --ignored --nocapture \
             || { echo "Retrying the downloads in 30 s"; sleep 30; cargo test --lib install::tests::fetch_tools -- --ignored --nocapture; }
 
+      - name: Keep the downloaded converters (Windows)
+        if: runner.os == 'Windows' && steps.dl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src-tauri/tools
+          key: tools-${{ matrix.name }}-${{ hashFiles('src-tauri/src/install.rs', 'ci/bundle-mac-tools.sh') }}-${{ steps.dmonth.outputs.m }}
+
       - name: Tests with real conversions (Windows)
+        timeout-minutes: 60
         if: runner.os == 'Windows'
         working-directory: src-tauri
         run: cargo test -- --nocapture

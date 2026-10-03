@@ -17,11 +17,11 @@
 //! "Recent AI jobs" in Settings.
 
 use crate::engine::{self, Event, Request, Sink};
-use crate::{cli, settings, size, wheel};
+use crate::{cli, settings, size};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -636,13 +636,6 @@ pub fn serve_on(input: impl BufRead, output: Box<dyn Write + Send>) -> i32 {
 pub fn serve() -> i32 {
     log::info!("mcp: started");
     serve_on(std::io::stdin().lock(), Box::new(std::io::stdout()))
-}
-
-/// What a file could become, for tests and the tool.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn names_for(path: &Path) -> Vec<String> {
-    let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    wheel::conversions_for(&ext).into_iter().map(|c| c.name).collect()
 }
 
 #[cfg(test)]
