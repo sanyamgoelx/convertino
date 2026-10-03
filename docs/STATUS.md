@@ -63,7 +63,7 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - Compare: finished Compress jobs (not audio) get a Compare button (ring pill and corner card) → compare window (ui/compare.*, compare.rs): original vs result under a slider; video = middle frame, PDF = page 1.
 - Not adopted (user): re-checking the output and redoing it when it comes out over the size.
 
-## RAW photos, command line, MCP (3 Oct 2026, pushed 9a92c0d, not released)
+## RAW photos, command line, MCP (3 Oct 2026, releasing as 0.2.0-rc.1, a pre-release)
 
 - Plan and how it was built: `docs/PLAN-RAW-CLI-MCP.md`. Mock-up (approved, "good to go"): https://claude.ai/artifact/MbTKhjexfYJjFktUAJy4Ga
 - RAW photo wheel (DNG, CR2/CR3, NEF, ARW, RAF, ORF, RW2, PEF, SRW, …): JPG, PNG, TIFF 16-bit, AVIF, WEBP, PDF, Compress, Camera JPG; EXIF copied.
@@ -71,5 +71,7 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - `convertino mcp` MCP server + Settings › AI & CLI (Connect for Claude Desktop / Claude Code / Cursor, Copy setup, AI on/off, corner card "via …", recent AI jobs).
 - Checked on the PC with run-checks (3 Oct): tests 107 + 13 command line + 6 MCP all pass, smoke all green; RAW samples in test-files/raw.
 - CI now: Windows tests too, RAW samples, and installs the built installers (Windows over the previous release, then uninstall; Mac from the .dmg). Releases: a version with "-" (0.2.0-rc.1) is a pre-release; "Release check" re-installs the published files and verifies latest.json signatures; release.cmd waits for a green Build run before tagging.
-- CI so far (pushed 4c1abd9): Intel Mac green; Apple silicon tests failed (log not read yet); Windows stuck downloading LibreOffice from a slow mirror (LibreOffice 26.8.1 was half-way across the mirrors on 3 Oct). Fixes for that are in 4c1abd9 (older-version fallback, skip 404 mirrors, drop slow mirrors, converter cache in CI).
-- Next: double-click ci-log.cmd and read ci.log (Apple silicon failure); fix; push; when Build is green, try Settings › AI & CLI on the PC; then 0.2.0-rc.1 when the user says "Publish". Computer use can't click while Valorant runs.
+- RAW on Mac: Homebrew builds ImageMagick with `--with-raw=no`, so its DNG coder reads nothing. The Mac bundle now ships LibRaw's `dcraw_emu` next to `magick` (ci/bundle-mac-tools.sh); raw.rs `develop_with_libraw` uses it when present (same settings: camera WB, sRGB, 16-bit), else ImageMagick; rawler stays the fallback. The real-RAW test requires LibRaw for DNG/NEF/ARW and lets rawler cover CR3/CRW/RAF when the LibRaw version can't.
+- CI (3 Oct): all green at 95093b7 (run 37128840130): Windows, Intel Mac, Apple silicon, and the install checks on Windows and Mac. ci-log.cmd now also reads runs that are still going.
+- 3 Oct: user said "Publish": version raised to 0.2.0-rc.1 (package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json), release.cmd run.
+- Next: when the Release and Release check runs are green, install 0.2.0-rc.1 from GitHub Releases and try Settings › AI & CLI; a final 0.2.0 later (installed copies only update to non-pre-releases). Computer use can't click while Valorant or Task Manager is in front.
