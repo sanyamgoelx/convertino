@@ -4,8 +4,13 @@ $ErrorActionPreference = "Continue"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $gh = "$env:ProgramFiles\GitHub CLI\gh.exe"
 $repo = "sanyamgoelx/convertino"
-$runs = (& $gh run list --repo $repo --status completed --limit 10 --json databaseId,conclusion) -join "`n" | ConvertFrom-Json
-$id = ($runs | Where-Object { $_.conclusion -in @("failure", "cancelled") } | Select-Object -First 1).databaseId
+# The newest run with a failed or cancelled job, even while its other jobs still run.
+$runs = (& $gh run list --repo $repo --limit 10 --json databaseId) -join "`n" | ConvertFrom-Json
+$id = $null
+foreach ($r in $runs) {
+  $jobs = (& $gh api "repos/$repo/actions/runs/$($r.databaseId)/jobs") -join "`n" | ConvertFrom-Json
+  if ($jobs.jobs | Where-Object { $_.conclusion -in @("failure", "cancelled") }) { $id = $r.databaseId; break }
+}
 "run $id" | Set-Content -Path ci.log -Encoding utf8
 $data = (& $gh api "repos/$repo/actions/runs/$id/jobs") -join "`n" | ConvertFrom-Json
 foreach ($j in $data.jobs) {

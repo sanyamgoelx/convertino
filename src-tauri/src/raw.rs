@@ -463,14 +463,19 @@ mod tests {
         }
         for p in samples {
             let tmp = TempDir::new("rawtest").unwrap();
-            // Today's formats through ImageMagick itself, not the fallback: the converters
-            // that ship must read them. (The Mac's ImageMagick can't read the 2000-era
-            // Canon CRW sample; rawler develops that one.)
-            let old_format = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("crw"));
-            let dev = if old_format {
-                develop(&p, &tmp.0).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
-            } else {
-                develop_with_magick(&p, &tmp.0).unwrap_or_else(|e| panic!("{}: ImageMagick: {e}", p.display()))
+            // Every sample must develop. The common formats must go through ImageMagick
+            // itself (the converter that ships), not only the fallback; newer or older ones
+            // (CR3, CRW) depend on the LibRaw inside each platform's ImageMagick, and rawler
+            // takes over there, as it does for users.
+            let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+            let must_magick = matches!(ext.as_str(), "dng" | "nef" | "arw");
+            let dev = match develop_with_magick(&p, &tmp.0) {
+                Ok(d) => d,
+                Err(e) if must_magick => panic!("{}: ImageMagick: {e}", p.display()),
+                Err(e) => {
+                    eprintln!("{}: ImageMagick can't ({e}); checking the rawler fallback", p.display());
+                    develop(&p, &tmp.0).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+                }
             };
             let m = meta(&p).unwrap();
             let (w, h) = dims(&dev);
