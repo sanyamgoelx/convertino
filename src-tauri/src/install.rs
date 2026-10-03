@@ -292,9 +292,8 @@ fn fetch_and_unpack(pack: Pack, work: &Path) -> Result<String, String> {
             file_name(&zip)
         }
         Pack::LibreOffice => {
-            let version = libreoffice_version()?;
             let msi = w.join("LibreOffice.msi");
-            libreoffice_download(&format!("{version}/win/x86_64/LibreOffice_{version}_Win_x86-64.msi"), &msi, name)?;
+            let version = libreoffice_fetch(|v| format!("{v}/win/x86_64/LibreOffice_{v}_Win_x86-64.msi"), &msi, name)?;
             report(1.0, &format!("Setting up {name} (this takes a minute)…"));
             msi_unpack(&msi, &staging, name)?;
             format!("LibreOffice {version}")
@@ -1100,6 +1099,54 @@ fn libreoffice_download(path: &str, dest: &Path, what: &str) -> Result<(), Strin
     Err(last)
 }
 
+/// Every `href="X.Y.Z/"` in a directory listing, newest first.
+fn listed_versions(page: &str) -> Vec<String> {
+    let mut v: Vec<String> = page
+        .split("href=\"")
+        .skip(1)
+        .filter_map(|s| s.split('"').next()?.strip_suffix('/'))
+        .filter(|v| v.split('.').count() == 3 && v.split('.').all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit())))
+        .map(str::to_string)
+        .collect();
+    v.sort_by_key(|x| std::cmp::Reverse(version_key(x)));
+    v.dedup();
+    v
+}
+
+/// Downloads LibreOffice: the newest stable version, or the one before it when
+/// the newest isn't on the mirrors for this system yet (a fresh release reaches
+/// the mirrors one platform at a time). Returns the version it got.
+fn libreoffice_fetch(path_for: impl Fn(&str) -> String, dest: &Path, what: &str) -> Result<String, String> {
+    let mut versions = Vec::new();
+    let mut last = String::new();
+    for base in LIBREOFFICE_MIRRORS {
+        match fetch_text(base, "LibreOffice") {
+            Ok(page) => {
+                versions = listed_versions(&page);
+                if !versions.is_empty() {
+                    break;
+                }
+                last = "Couldn't find the current LibreOffice version.".into();
+            }
+            Err(e) => last = e,
+        }
+    }
+    if versions.is_empty() {
+        return Err(last);
+    }
+    for version in versions.iter().take(3) {
+        match libreoffice_download(&path_for(version), dest, what) {
+            Ok(()) => return Ok(version.clone()),
+            Err(e) if e == procs::CANCELLED => return Err(e),
+            Err(e) => {
+                log::warn!("LibreOffice {version} isn't downloadable here ({e}); trying the version before");
+                last = e;
+            }
+        }
+    }
+    Err(last)
+}
+
 /// The highest `href="X.Y.Z/"` in a directory listing.
 fn newest_listed_version(page: &str) -> Option<String> {
     page.split("href=\"")
@@ -1483,9 +1530,8 @@ mod mac {
                 Ok(file_name(&zip))
             }
             Pack::LibreOffice => {
-                let version = libreoffice_version()?;
                 let dmg = w.join("LibreOffice.dmg");
-                libreoffice_download(&libreoffice_path(&version), &dmg, name)?;
+                let version = libreoffice_fetch(|v| libreoffice_path(v), &dmg, name)?;
                 report(1.0, &format!("Setting up {name} (this takes a minute)…"));
                 let mnt = w.join("mnt");
                 fs::create_dir_all(&mnt).map_err(|e| e.to_string())?;
@@ -1535,6 +1581,8 @@ mod mac {
             let lo = libreoffice_path("26.2.1");
             assert!(lo.starts_with("26.2.1/mac/") && lo.ends_with(".dmg"), "{lo}");
             assert!(LIBREOFFICE_MIRRORS.iter().all(|m| m.starts_with("https://") && m.ends_with("/libreoffice/stable/")));
+            let page = r#"<a href="../">..</a> <a href="26.2.6/">26.2.6/</a> <a href="26.8.1/">26.8.1/</a> <a href="26.8.0/">x</a> <a href="readme/">r</a>"#;
+            assert_eq!(listed_versions(page), vec!["26.8.1", "26.8.0", "26.2.6"]);
             assert!(Pack::Magick.bundled_on_mac() && !Pack::Ffmpeg.bundled_on_mac());
         }
     }

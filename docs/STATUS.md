@@ -1,6 +1,6 @@
 # Convertino — status
 
-Last updated: 1 Oct 2026. Shared with the Claude Project "Convertino" (claude/convertino-status.md).
+Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/convertino-status.md).
 
 ## Where things are
 
@@ -63,6 +63,12 @@ Last updated: 1 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - Compare: finished Compress jobs (not audio) get a Compare button (ring pill and corner card) → compare window (ui/compare.*, compare.rs): original vs result under a slider; video = middle frame, PDF = page 1.
 - Not adopted (user): re-checking the output and redoing it when it comes out over the size.
 
-## Next (3 Oct 2026)
+## RAW photos, command line, MCP (3 Oct 2026, pushed 9a92c0d, not released)
 
-- RAW photos, command line and MCP: plan in `docs/PLAN-RAW-CLI-MCP.md`, mock-up https://claude.ai/artifact/MbTKhjexfYJjFktUAJy4Ga. Waiting for the user's OK on the design before building. Decisions: read all camera RAW (no DNG writing), CLI installed with the app, MCP built in with one-click Connect, AI apps may convert any file they name.
+- Plan and how it was built: `docs/PLAN-RAW-CLI-MCP.md`. Mock-up (approved, "good to go"): https://claude.ai/artifact/MbTKhjexfYJjFktUAJy4Ga
+- RAW photo wheel (DNG, CR2/CR3, NEF, ARW, RAF, ORF, RW2, PEF, SRW, …): JPG, PNG, TIFF 16-bit, AVIF, WEBP, PDF, Compress, Camera JPG; EXIF copied.
+- `convertino` command (installed to `<install>\bin`, on PATH; Mac: Settings › AI & CLI › Install command…).
+- `convertino mcp` MCP server + Settings › AI & CLI (Connect for Claude Desktop / Claude Code / Cursor, Copy setup, AI on/off, corner card "via …", recent AI jobs).
+- Checked on the PC with run-checks (3 Oct): tests 107 + 13 command line + 6 MCP all pass, smoke all green; RAW samples in test-files/raw.
+- CI now: Windows tests too, RAW samples, and installs the built installers (Windows over the previous release, then uninstall; Mac from the .dmg). Releases: a version with "-" (0.2.0-rc.1) is a pre-release; "Release check" re-installs the published files and verifies latest.json signatures; release.cmd waits for a green Build run before tagging.
+- Next: CI result of 9a92c0d; then try Settings › AI & CLI on the PC (Connect Claude Desktop, ask it to convert a file), then a test release 0.2.0-rc.1 when the user says "Publish".

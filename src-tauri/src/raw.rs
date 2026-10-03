@@ -55,6 +55,11 @@ pub struct Meta {
 }
 
 impl Meta {
+    /// Taken holding the camera upright (EXIF orientation 5–8).
+    pub fn portrait(&self) -> bool {
+        self.exif.as_ref().and_then(|e| e.orientation).is_some_and(|o| (5..=8).contains(&o))
+    }
+
     pub fn megapixels(&self) -> f64 {
         (self.width * self.height) as f64 / 1e6
     }
@@ -95,20 +100,9 @@ const DEVELOP_LIMIT: Duration = Duration::from_secs(5 * 60);
 
 /// Develops `input` into a 16-bit picture in `dir`, the right way up.
 pub fn develop(input: &Path, dir: &Path) -> Result<PathBuf, String> {
-    let out = dir.join("developed.tiff");
-    let first = (|| -> Result<(), String> {
-        let exe = tools::require(Tool::Magick)?;
-        let mut cmd = tools::command(&exe);
-        // Camera white balance (what the photographer saw), sRGB output.
-        cmd.args(["-define", "dng:use-camera-wb=true", "-define", "dng:output-color=1"]);
-        cmd.arg(input);
-        cmd.args(["-auto-orient", "-depth", "16", "-compress", "none"]);
-        cmd.arg(&out);
-        procs::output(&mut cmd, "ImageMagick", Some(DEVELOP_LIMIT))?;
-        if out.metadata().map(|m| m.len() > 0).unwrap_or(false) { Ok(()) } else { Err("ImageMagick wrote nothing".into()) }
-    })();
+    let first = develop_with_magick(input, dir);
     match first {
-        Ok(()) => Ok(out),
+        Ok(out) => Ok(out),
         Err(e) if e == procs::CANCELLED => Err(e),
         Err(e) => {
             log::warn!("raw: ImageMagick couldn't develop {} ({e}); trying rawler", input.display());
@@ -120,6 +114,27 @@ pub fn develop(input: &Path, dir: &Path) -> Result<PathBuf, String> {
             Ok(png)
         }
     }
+}
+
+/// The usual way: ImageMagick's LibRaw.
+pub(crate) fn develop_with_magick(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    let out = dir.join("developed.tiff");
+    let first = (|| -> Result<(), String> {
+        let exe = tools::require(Tool::Magick)?;
+        let mut cmd = tools::command(&exe);
+        // Camera white balance (what the photographer saw), sRGB output.
+        cmd.args(["-define", "dng:use-camera-wb=true", "-define", "dng:output-color=1"]);
+        // "DNG:" makes ImageMagick use LibRaw: a CR3 starts like a HEIC file and
+        // would otherwise go to the HEIC reader (that happened on the Mac).
+        let mut src = std::ffi::OsString::from("DNG:");
+        src.push(input.as_os_str());
+        cmd.arg(src);
+        cmd.args(["-auto-orient", "-depth", "16", "-compress", "none"]);
+        cmd.arg(&out);
+        procs::output(&mut cmd, "ImageMagick", Some(DEVELOP_LIMIT))?;
+        if out.metadata().map(|m| m.len() > 0).unwrap_or(false) { Ok(()) } else { Err("ImageMagick wrote nothing".into()) }
+    })();
+    first.map(|_| out)
 }
 
 fn develop_rawler(input: &Path, out: &Path) -> Result<(), String> {
@@ -448,13 +463,19 @@ mod tests {
         }
         for p in samples {
             let tmp = TempDir::new("rawtest").unwrap();
-            let dev = develop(&p, &tmp.0).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+            // ImageMagick itself, not the fallback: the converters that ship must read every sample.
+            let dev = develop_with_magick(&p, &tmp.0).unwrap_or_else(|e| panic!("{}: ImageMagick: {e}", p.display()));
             let m = meta(&p).unwrap();
             let (w, h) = dims(&dev);
             // About the sensor's size (cameras crop a few edge pixels).
             let (long, sensor) = (w.max(h) as f64, m.width.max(m.height) as f64);
             assert!(long > sensor * 0.85 && long <= sensor * 1.05, "{}: {w}x{h} from a {}x{} sensor", p.display(), m.width, m.height);
             colour_check(&dev);
+            // And the fallback works too.
+            let png = tmp.0.join("fallback.png");
+            if let Err(e) = develop_rawler(&p, &png) {
+                eprintln!("{}: rawler can't develop it ({e}); ImageMagick does", p.display());
+            }
         }
     }
 

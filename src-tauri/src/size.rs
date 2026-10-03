@@ -140,6 +140,16 @@ fn measure(kind: Kind, path: &Path, download: bool) -> Result<Info, String> {
     let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     let mut i = Info { path: path.to_path_buf(), bytes, ext, ..Info::default() };
     match kind {
+        // A RAW photo: its size from the file itself (no developing needed); never transparent.
+        Kind::Image if crate::raw::is_raw(path) => {
+            let m = crate::raw::meta(path)?;
+            if m.width == 0 || m.height == 0 {
+                return Err(format!("Couldn't read the photo in {}.", i.name()));
+            }
+            // Sensors are landscape; a portrait photo is turned when developed.
+            let (w, h) = (m.width as u32, m.height as u32);
+            (i.width, i.height) = if m.portrait() { (h.min(w), h.max(w)) } else { (w, h) };
+        }
         Kind::Image => {
             let exe = tools::require(Tool::Magick)?;
             let mut src = path.as_os_str().to_os_string();
