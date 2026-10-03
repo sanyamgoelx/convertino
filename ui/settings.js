@@ -41,7 +41,7 @@ const LICENCES = [
   ["Convertino", "GNU GPL 3.0 or later"],
   ["FFmpeg", "GNU LGPL 2.1 or later (the x264/x265 build: GNU GPL 2.0 or later)"],
   ["ImageMagick", "ImageMagick License (Apache 2.0 style)"],
-  ["LibRaw (inside ImageMagick, for RAW photos)", "GNU LGPL 2.1 or CDDL 1.0"],
+  ["LibRaw (RAW photos: inside ImageMagick on Windows, dcraw_emu on Mac)", "GNU LGPL 2.1 or CDDL 1.0"],
   ["rawler (RAW photo details and camera pictures)", "GNU LGPL 2.1"],
   ["little_exif, image (EXIF and picture files)", "MIT or Apache 2.0"],
   ["Poppler", "GNU GPL 2.0 or 3.0"],

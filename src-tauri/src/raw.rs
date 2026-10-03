@@ -100,12 +100,12 @@ const DEVELOP_LIMIT: Duration = Duration::from_secs(5 * 60);
 
 /// Develops `input` into a 16-bit picture in `dir`, the right way up.
 pub fn develop(input: &Path, dir: &Path) -> Result<PathBuf, String> {
-    let first = develop_with_magick(input, dir);
+    let first = develop_with_libraw(input, dir);
     match first {
         Ok(out) => Ok(out),
         Err(e) if e == procs::CANCELLED => Err(e),
         Err(e) => {
-            log::warn!("raw: ImageMagick couldn't develop {} ({e}); trying rawler", input.display());
+            log::warn!("raw: LibRaw couldn't develop {} ({e}); trying rawler", input.display());
             let png = dir.join("developed.png");
             develop_rawler(input, &png).map_err(|e2| {
                 log::warn!("raw: rawler couldn't either: {e2}");
@@ -116,8 +116,29 @@ pub fn develop(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// The usual way: ImageMagick's LibRaw.
-pub(crate) fn develop_with_magick(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+/// The usual way: LibRaw, through ImageMagick, or through LibRaw's own
+/// dcraw_emu where one ships next to ImageMagick (the Mac: Homebrew builds
+/// ImageMagick without LibRaw, so the bundle adds Homebrew's dcraw_emu).
+pub(crate) fn develop_with_libraw(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    let magick = tools::require(Tool::Magick)?;
+    let emu = magick.parent().map(|d| d.join(if cfg!(windows) { "dcraw_emu.exe" } else { "dcraw_emu" }));
+    match emu {
+        Some(emu) if emu.is_file() => develop_with_dcraw_emu(&emu, input, dir),
+        _ => develop_with_magick(input, dir),
+    }
+}
+
+/// LibRaw's dcraw_emu: camera white balance, sRGB, 16-bit TIFF, turned the
+/// way the camera says (it applies the orientation itself).
+fn develop_with_dcraw_emu(exe: &Path, input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    let out = dir.join("developed.tiff");
+    let mut cmd = tools::command(exe);
+    cmd.args(["-w", "-o", "1", "-6", "-T", "-Z"]).arg(&out).arg(input);
+    procs::output(&mut cmd, "LibRaw", Some(DEVELOP_LIMIT))?;
+    if out.metadata().map(|m| m.len() > 0).unwrap_or(false) { Ok(out) } else { Err("LibRaw wrote nothing".into()) }
+}
+
+fn develop_with_magick(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     let out = dir.join("developed.tiff");
     let first = (|| -> Result<(), String> {
         let exe = tools::require(Tool::Magick)?;
@@ -463,17 +484,16 @@ mod tests {
         }
         for p in samples {
             let tmp = TempDir::new("rawtest").unwrap();
-            // Every sample must develop. The common formats must go through ImageMagick
-            // itself (the converter that ships), not only the fallback; newer or older ones
-            // (CR3, CRW) depend on the LibRaw inside each platform's ImageMagick, and rawler
-            // takes over there, as it does for users.
+            // Every sample must develop. The common formats must go through LibRaw (the
+            // converters that ship), not only the fallback; newer or older ones (CR3, CRW)
+            // depend on the LibRaw version, and rawler takes over there, as it does for users.
             let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-            let must_magick = matches!(ext.as_str(), "dng" | "nef" | "arw");
-            let dev = match develop_with_magick(&p, &tmp.0) {
+            let must_libraw = matches!(ext.as_str(), "dng" | "nef" | "arw");
+            let dev = match develop_with_libraw(&p, &tmp.0) {
                 Ok(d) => d,
-                Err(e) if must_magick => panic!("{}: ImageMagick: {e}", p.display()),
+                Err(e) if must_libraw => panic!("{}: LibRaw: {e}", p.display()),
                 Err(e) => {
-                    eprintln!("{}: ImageMagick can't ({e}); checking the rawler fallback", p.display());
+                    eprintln!("{}: LibRaw can't ({e}); checking the rawler fallback", p.display());
                     develop(&p, &tmp.0).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
                 }
             };

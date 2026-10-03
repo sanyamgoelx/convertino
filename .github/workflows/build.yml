@@ -89,8 +89,9 @@ jobs:
           "$T/imagemagick/magick" -size 64x48 gradient:red-blue /tmp/g.png && echo "magick gradient OK"
           "$T/imagemagick/magick" /tmp/g.png -quality 80 /tmp/g.jpg && "$T/imagemagick/magick" /tmp/g.png /tmp/g.webp && "$T/imagemagick/magick" /tmp/g.png /tmp/g.avif && echo "magick jpg/webp/avif OK"
           "$T/imagemagick/magick" /tmp/g.png /tmp/g.pdf && echo "magick pdf OK"
-          # Camera RAW photos go through ImageMagick's LibRaw coder.
-          "$T/imagemagick/magick" -list format | grep -E "^ +(DNG|CR3)" || { echo "The bundled ImageMagick can't read RAW photos"; exit 1; }
+          # Camera RAW photos go through LibRaw's dcraw_emu (Homebrew's ImageMagick has no LibRaw).
+          { "$T/imagemagick/dcraw_emu" 2>&1 || true; } | grep -q "Usage" || { echo "The bundled dcraw_emu doesn't start"; exit 1; }
+          echo "dcraw_emu OK"
           "$T/poppler/bin/pdftoppm" -png -r 72 /tmp/g.pdf /tmp/page && ls /tmp/page* && echo "pdftoppm OK"
           # Same data path the app sets (tools.rs, GS_LIB), so this doesn't lean on Homebrew's own Ghostscript.
           GSS="$T/ghostscript/share/ghostscript"; GL=""

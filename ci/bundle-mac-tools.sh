@@ -8,7 +8,7 @@
 #   ci/bundle-mac-tools.sh [output folder]   (default: src-tauri/mac-tools)
 #
 # Layout (tools.rs finds them; a .bundled file makes tools.rs set the data paths):
-#   imagemagick/magick, lib/, modules/{coders,filters}/, etc/
+#   imagemagick/magick, dcraw_emu (LibRaw), lib/, modules/{coders,filters}/, etc/
 #   poppler/bin/{pdftoppm,pdftotext,pdfseparate,pdfunite}, lib/, share/poppler/
 #   ghostscript/bin/gs, lib/, share/ghostscript/
 # Each also gets etc/fonts/fonts.conf (the Mac's own font folders).
@@ -17,7 +17,7 @@ set -euo pipefail
 OUT="${1:-src-tauri/mac-tools}"
 BREW="$(brew --prefix)"
 brew list dylibbundler >/dev/null 2>&1 || brew install dylibbundler
-for f in imagemagick poppler ghostscript; do brew list "$f" >/dev/null 2>&1 || brew install "$f"; done
+for f in imagemagick libraw poppler ghostscript; do brew list "$f" >/dev/null 2>&1 || brew install "$f"; done
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -62,6 +62,9 @@ relocate() {
 IM="$OUT/imagemagick"
 IMP="$(brew --prefix imagemagick)"
 copy "$IMP/bin/magick" "$IM"
+# Homebrew builds ImageMagick without LibRaw, so camera RAW photos go through
+# LibRaw's own dcraw_emu (raw.rs looks for it next to magick).
+copy "$(brew --prefix libraw)/bin/dcraw_emu" "$IM"
 mods=()
 MODDIR="$(find "$IMP/lib" -maxdepth 3 -type d -name 'modules-*' | head -1 || true)"
 if [ -n "$MODDIR" ]; then
@@ -78,7 +81,7 @@ if [ -n "$MODDIR" ]; then
     fi
   done
 fi
-relocate "$IM/lib" @executable_path/lib "$IM/magick" ${mods[@]+"${mods[@]}"}
+relocate "$IM/lib" @executable_path/lib "$IM/magick" "$IM/dcraw_emu" ${mods[@]+"${mods[@]}"}
 for m in ${mods[@]+"${mods[@]}"}; do install_name_tool -add_rpath @loader_path/../../lib "$m" 2>/dev/null || true; done
 mkdir -p "$IM/etc"
 cp "$IMP"/etc/ImageMagick-*/*.xml "$IM/etc/" 2>/dev/null || true
