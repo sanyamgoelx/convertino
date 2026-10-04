@@ -92,11 +92,12 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - Released: Build 22a3c23 green, tag v0.2.0-rc.2, Release run 37182245503 green including Release check (installs on Windows, Intel Mac, Apple silicon; updater files verify). https://github.com/sanyamgoelx/convertino/releases/tag/v0.2.0-rc.2
 - Next: install rc.2 and use Ask Claude for a while; a final 0.2.0 (non-pre-release, so installed copies update) when happy.
 
-## Claude didn't use Convertino from a chat (4 Oct 2026, not pushed yet)
+## Claude didn't use Convertino from a chat (4 Oct 2026, pushed 79ac591, CI green, not released)
 
 - Seen: Ask Claude (Chat) with three Valorant clips + "compress these": Claude said the files didn't upload and it can't reach E:, and gave FFmpeg commands. The MCP itself was fine (converters_status answered from Cowork).
 - Cause: the Chat link sent only paths; Claude Desktop keeps connected tools deferred behind tool search, and Convertino's descriptions never said they reach local files, so Claude didn't look for them.
 - Fix: `ask::CHAT_INTRO` first line of the Chat link ("These files are on my computer (Convertino can open and convert them):"); mcp.rs INSTRUCTIONS rewritten (local paths, don't ask for an upload, compress vs compress_to_size, report where/how big); list_conversions / convert / compress_to_size descriptions start with "Works on files on the user's computer (local paths like E:\\Videos\\clip.mp4 or ~/Photos/…); no upload needed." Tool names and inputs unchanged.
 - Tests (Linux, cloud): lib 116 pass (2 ignored) incl. new `instructions_point_at_local_files` and the description check in `tool_list_is_stable`; tests/mcp.rs 6 pass.
 - Pushed 49300bd: Build failed on Apple silicon only: `ask::tests::links_stay_short_enough_to_open` (Chat link 8001 chars > 8000). The intro line ate into the fixed 120-char reserve for the "…and N more in <folder>" line, and the Mac temp folder is long. Fix: chat_link now builds the whole link and drops paths until it fits (no fixed reserve). Swept 160 temp-folder lengths on Linux: old code failed 38, new 0.
-- Next: run-checks.cmd on the PC, push, CI, then "Publish" → 0.2.0-rc.3. Then re-try the same chat (with and without Ask Claude).
+- Pushed 79ac591 after run-checks on the PC: Build run 37219515910 all green (Windows, Intel Mac, Apple silicon, install checks on Windows and Mac).
+- 5 Oct: user said "Publish": version raised to 0.2.0-rc.3 (five files), release.cmd run. Then re-try the same chat (with and without Ask Claude).
