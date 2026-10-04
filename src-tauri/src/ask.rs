@@ -266,12 +266,22 @@ fn chat_link(items: &[PathBuf]) -> String {
         lines.push(line);
         left -= 1;
     }
-    if left > 0 {
-        let rest: Vec<PathBuf> = items[items.len() - left..].to_vec();
-        let where_ = common_folder(&rest).map(|f| format!(" in {}", path_str(&f))).unwrap_or_default();
-        lines.push(format!("…and {left} more{where_}"));
+    // The "…and N more in <folder>" line has no fixed length (the folder can be long, e.g. a Mac
+    // temp folder), so drop paths until the whole link fits.
+    loop {
+        let mut all = lines.clone();
+        if left > 0 {
+            let rest: Vec<PathBuf> = items[items.len() - left..].to_vec();
+            let where_ = common_folder(&rest).map(|f| format!(" in {}", path_str(&f))).unwrap_or_default();
+            all.push(format!("…and {left} more{where_}"));
+        }
+        let url = query(BASE, &[("q", format!("{}\n\n", all.join("\n")))]);
+        if url.len() <= MAX_LINK || lines.len() <= 1 {
+            return url;
+        }
+        lines.pop();
+        left += 1;
     }
-    query(BASE, &[("q", format!("{}\n\n", lines.join("\n")))])
 }
 
 fn code_link(items: &[PathBuf]) -> String {
