@@ -76,7 +76,7 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - 3 Oct: user said "Publish": version raised to 0.2.0-rc.1 (package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json), release.cmd run. Build da18d16 green, tag v0.2.0-rc.1 pushed, Release run 37134573580 green including Release check (installs on Windows, Intel Mac, Apple silicon; updater files verify). https://github.com/sanyamgoelx/convertino/releases/tag/v0.2.0-rc.1
 - Next: install 0.2.0-rc.1 from GitHub Releases and try Settings › AI & CLI; a final 0.2.0 later (installed copies only update to non-pre-releases). Computer use can't click while Valorant or Task Manager is in front.
 
-## Ask Claude (4 Oct 2026, pushed c0fa398, CI green, not released)
+## Ask Claude (released 4 Oct 2026 as 0.2.0-rc.2, a pre-release)
 
 - Design: boards 6–9 on https://claude.ai/artifact/MbTKhjexfYJjFktUAJy4Ga (approved: "Build now"; the button shows only when Convertino is connected to Claude).
 - Wheel: an **Ask Claude** pill on the ring's bottom edge (key C; Shift+click / Shift+C: Cowork, Chat or Claude Code, "Use this every time"). Hidden in the size ring, for Save-dialog conversions, when AI apps are off, when the setting is off, and when no Claude app has Convertino connected (Cowork/Chat need Claude Desktop, Code needs Claude Code). Window 420 × 490 (was 460); the hint moves to 394 px.
@@ -89,3 +89,13 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - CI 4 Oct (635a2e3): Windows green; Apple silicon failed making the .dmg (`bundle_dmg.sh`, hdiutil "Resource busy", random on GitHub's Macs). Fix: Build stops XProtect first and retries the Mac build up to 3 times; Release stops XProtect and uses tauri-action `retryAttempts: 2`.
 - CI 4 Oct (4a2a0b7, run 37179644708): all green, including the install checks. Ready for "Publish" (0.2.0-rc.2).
 - 4 Oct: user said "Publish": version raised to 0.2.0-rc.2 (five files), release.cmd run.
+- Released: Build 22a3c23 green, tag v0.2.0-rc.2, Release run 37182245503 green including Release check (installs on Windows, Intel Mac, Apple silicon; updater files verify). https://github.com/sanyamgoelx/convertino/releases/tag/v0.2.0-rc.2
+- Next: install rc.2 and use Ask Claude for a while; a final 0.2.0 (non-pre-release, so installed copies update) when happy.
+
+## Claude didn't use Convertino from a chat (4 Oct 2026, not pushed yet)
+
+- Seen: Ask Claude (Chat) with three Valorant clips + "compress these": Claude said the files didn't upload and it can't reach E:, and gave FFmpeg commands. The MCP itself was fine (converters_status answered from Cowork).
+- Cause: the Chat link sent only paths; Claude Desktop keeps connected tools deferred behind tool search, and Convertino's descriptions never said they reach local files, so Claude didn't look for them.
+- Fix: `ask::CHAT_INTRO` first line of the Chat link ("These files are on my computer (Convertino can open and convert them):"); mcp.rs INSTRUCTIONS rewritten (local paths, don't ask for an upload, compress vs compress_to_size, report where/how big); list_conversions / convert / compress_to_size descriptions start with "Works on files on the user's computer (local paths like E:\\Videos\\clip.mp4 or ~/Photos/…); no upload needed." Tool names and inputs unchanged.
+- Tests (Linux, cloud): lib 116 pass (2 ignored) incl. new `instructions_point_at_local_files` and the description check in `tool_list_is_stable`; tests/mcp.rs 6 pass.
+- Next: run-checks.cmd on the PC, push, CI, then "Publish" → 0.2.0-rc.3. Then re-try the same chat (with and without Ask Claude).

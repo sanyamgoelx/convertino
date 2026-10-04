@@ -5,7 +5,7 @@
 //! It uses Claude's own desktop links
 //! (https://support.claude.com/en/articles/14729294-open-claude-desktop-with-a-link):
 //!
-//! - Chat: `claude://claude.ai/new?q=…` starts a new chat with the file paths
+//! - Chat: `claude://claude.ai/new?q=…` starts a new chat with CHAT_INTRO and the file paths
 //!   written in; Claude Desktop runs Convertino right here.
 //! - Code: `claude://code/new?folder=…&q=…` opens a Claude Code session in the files' folder.
 //!
@@ -246,10 +246,14 @@ pub fn link(mode: Mode, items: &[PathBuf]) -> String {
     }
 }
 
+/// First line of a Chat link: tells Claude the paths are local and Convertino can reach them,
+/// so it uses the Convertino tools instead of asking for an upload.
+pub const CHAT_INTRO: &str = "These files are on my computer (Convertino can open and convert them):";
+
 fn chat_link(items: &[PathBuf]) -> String {
     const BASE: &str = "claude://claude.ai/new";
-    let mut lines: Vec<String> = Vec::new();
-    let mut used = BASE.len() + 3;
+    let mut lines: Vec<String> = vec![CHAT_INTRO.to_string()];
+    let mut used = BASE.len() + 3 + enc(CHAT_INTRO).len() + 3;
     let mut left = items.len();
     for p in items {
         let line = path_str(p);
@@ -399,7 +403,7 @@ mod tests {
         let url = link(Mode::Chat, &ps);
         assert!(url.starts_with("claude://claude.ai/new?q="), "{url}");
         let q = &params(&url)[0].1;
-        assert_eq!(q, &format!("{}\n{}\n\n", path_str(&ps[0]), path_str(&ps[1])), "spaces and & come back exactly");
+        assert_eq!(q, &format!("{CHAT_INTRO}\n{}\n{}\n\n", path_str(&ps[0]), path_str(&ps[1])), "spaces and & come back exactly");
         assert!(!url.contains(' '));
     }
 

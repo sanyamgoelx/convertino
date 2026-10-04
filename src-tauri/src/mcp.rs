@@ -29,9 +29,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /// Protocol versions this server speaks, newest first.
 const VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Convertino converts files on this computer: pictures (including camera RAW), audio, video, PDF, documents, spreadsheets/data and archives. \
-Call list_conversions first to see what a file can become, then convert (or compress_to_size). \
-Paths must be absolute. Results are saved next to the originals (or in outFolder); originals are never changed and existing files are never overwritten.";
+const INSTRUCTIONS: &str = "Convertino works directly on files on the user's own computer: local paths like E:\\Videos\\clip.mp4, C:\\Users\\…, /Users/… or ~/…. \
+When the user gives local file paths (or picked files with Convertino's Ask Claude) and wants them converted, compressed, made smaller, resized, turned into another format, merged, split or extracted, use these tools. \
+Don't ask for an upload and don't say you can't reach their files: Convertino can. \
+Pictures (including camera RAW), audio, video, PDF, documents, spreadsheets/data and archives. \
+Call list_conversions first to see what a file can become, then convert (to: \"compress\" for \"make it smaller\" with no size given) or compress_to_size (when a size or a limit like Discord or email is named). \
+Paths must be absolute. Results are saved next to the originals (or in outFolder); originals are never changed and existing files are never overwritten. \
+Tell the user where the new files are and how big they are.";
 
 // ---------- output ----------
 
@@ -68,14 +72,14 @@ pub fn tools() -> Value {
         {
             "name": "list_conversions",
             "title": "What can these files become?",
-            "description": "Lists, for each file, its kind and every format or action it can be converted to (the names to pass to convert as `to`).",
+            "description": "Works on files on the user's computer (local paths like E:\\Videos\\clip.mp4 or ~/Photos/…); no upload needed. Lists, for each file, its kind and every format or action it can be converted to (the names to pass to convert as `to`).",
             "inputSchema": { "type": "object", "properties": { "paths": paths_schema() }, "required": ["paths"] },
             "annotations": { "readOnlyHint": true, "openWorldHint": false }
         },
         {
             "name": "convert",
             "title": "Convert files",
-            "description": "Converts files to another format, or runs an action on them (compress, split, merge, extract, 720p, frames, camera-jpg, …). \
+            "description": "Works on files on the user's computer (local paths like E:\\Videos\\clip.mp4 or ~/Photos/…); no upload needed. Converts files to another format, or runs an action on them: compress (make files smaller without a set size), split, merge, extract, 720p, frames, camera-jpg, …). \
 Pictures, RAW photos, audio, video, PDF, documents, data and archives. New files are saved next to the originals unless outFolder is given; originals are never changed and nothing is overwritten. \
 Several files of the same kind are converted together (merge needs two or more PDFs).",
             "inputSchema": {
@@ -93,7 +97,7 @@ Several files of the same kind are converted together (merge needs two or more P
         {
             "name": "compress_to_size",
             "title": "Compress to a file size",
-            "description": "Makes pictures, RAW photos, videos, PDFs or audio fit a file size (for an upload or email limit). Convertino picks quality, resolution and frame rate. \
+            "description": "Works on files on the user's computer (local paths like E:\\Videos\\clip.mp4 or ~/Photos/…); no upload needed. Makes pictures, RAW photos, videos, PDFs or audio fit a file size (for an upload or email limit). Convertino picks quality, resolution and frame rate. \
 Files already under the size are left alone (except RAW photos, which always become a JPG).",
             "inputSchema": {
                 "type": "object",
@@ -654,8 +658,19 @@ mod tests {
         assert_eq!(required(2), vec!["paths", "size"]);
         for x in t.as_array().unwrap() {
             assert_eq!(x["inputSchema"]["type"], "object");
+            if x["name"] != "converters_status" {
+                // Claude Desktop finds tools by searching their descriptions: say they reach local files.
+                assert!(x["description"].as_str().unwrap().contains("user's computer"), "{}", x["name"]);
+            }
             assert!(x["description"].as_str().unwrap().len() > 40);
             assert!(x["annotations"]["readOnlyHint"].is_boolean());
+        }
+    }
+
+    #[test]
+    fn instructions_point_at_local_files() {
+        for w in ["user's own computer", "compress", "Don't ask for an upload", "compress_to_size"] {
+            assert!(INSTRUCTIONS.contains(w), "{w}");
         }
     }
 
