@@ -102,8 +102,8 @@ function draw() {
 
 // ---------- Ask Claude ----------
 // Shown only when Convertino is connected to Claude (Rust sends model.ask).
-// A click opens Claude with everything that was selected; Shift+click (or
-// Shift+C) asks where: Cowork, Chat or Claude Code.
+// A click starts a new Claude chat with the paths of everything selected;
+// with Claude Code connected too, Shift+click (or Shift+C) asks which.
 
 let askHover = false;
 const showAsk = () => !!(model && model.ask && !size);
@@ -116,9 +116,10 @@ const askMode = (id) => (model.ask.modes.find((m) => m.id === id) || model.ask.m
 
 function askHint() {
   const m = askMode(model.ask.default);
+  const n = selectedCount();
   const more = model.ask.modes.length > 1 ? " · Shift+click to choose where" : "";
   hintEl.innerHTML = `<span class="ht">Ask Claude</span>` +
-    `<span class="hs">Opens Claude (${esc(m.label)}) and ${esc(m.does.replace("the files", selectedCount() === 1 ? "the file" : `the ${selectedCount()} files`))}</span>` +
+    `<span class="hs">${esc(m.does.replace("the file paths", n === 1 ? "the file's path" : `the ${n} file paths`))}; you say what to do</span>` +
     `<span class="hk">Click or press C${more}</span>`;
 }
 
@@ -299,7 +300,7 @@ function showAskOptions() {
   optsKeep.checked = false;
   optsFields.innerHTML = `<fieldset class="opts-modes"><legend>Open in</legend>` + model.ask.modes.map((m) =>
     `<label class="opts-mode"><input type="radio" name="askmode" value="${esc(m.id)}"${m.id === model.ask.default ? " checked" : ""}>` +
-    `<span><b>${esc(m.label)}</b><span>${esc(m.does.charAt(0).toUpperCase() + m.does.slice(1))}</span></span></label>`).join("") + `</fieldset>`;
+    `<span><b>${esc(m.label)}</b><span>${esc(m.does)}</span></span></label>`).join("") + `</fieldset>`;
   optsEl.hidden = false;
   document.body.classList.add("with-opts");
   hintEl.classList.remove("show");
@@ -869,10 +870,9 @@ if (tauri) {
     files: [{ path: "C:\\Reports\\Q3-report.pdf", name: "Q3-report.pdf", ext: "pdf", family: "pdf", size: 2500000 }], skipped: [],
     hubTitle: "Q3-report.pdf", hubSubtitle: "PDF · 2.5 MB", hubFamily: "pdf", hubColor: "#C4262E",
     ring: true, handoffMs: 2000, quality: DEFAULT_Q,
-    ask: { default: "cowork", modes: [
-      { id: "cowork", label: "Cowork", does: "attaches the files" },
-      { id: "chat", label: "Chat", does: "writes the file paths into a new chat" },
-      { id: "code", label: "Claude Code", does: "opens a session in the files' folder" },
+    ask: { default: "chat", modes: [
+      { id: "chat", label: "Chat", does: "Starts a new chat with the file paths written in" },
+      { id: "code", label: "Claude Code", does: "Opens a Claude Code session in the files' folder" },
     ] },
     main: [
       t("pdf.jpg", "JPG", "image", "One image per page · 150 DPI"),

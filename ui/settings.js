@@ -736,11 +736,10 @@ function renderAi() {
 }
 
 // Ask Claude: shown on the wheel only when Convertino is connected to Claude
-// (Claude Desktop for Cowork and Chat, Claude Code for Code); see ask.rs.
+// (Claude Desktop for Chat, Claude Code for Code); see ask.rs.
 const ASK_MODES = [
-  { id: "cowork", app: "claude-desktop", name: "Cowork", sub: "Attaches the files. Claude sees them and converts on this computer. Best for most things." },
-  { id: "chat", app: "claude-desktop", name: "Chat", sub: "Writes the file paths into a new chat" },
-  { id: "code", app: "claude-code", name: "Claude Code", sub: "Opens a session in the files' folder" },
+  { id: "chat", app: "claude-desktop", name: "Chat", sub: "Starts a new chat in Claude Desktop with the file paths written in. Claude converts on this computer." },
+  { id: "code", app: "claude-code", name: "Claude Code", sub: "Opens a Claude Code session in the files' folder" },
 ];
 
 function renderAsk() {
@@ -757,7 +756,9 @@ function renderAsk() {
     ? "Turned off with “Let AI apps convert files” above"
     : !modes.length
       ? "Connect Convertino to Claude Desktop or Claude Code above, and an Ask Claude button appears on the wheel: it opens Claude with the files you right-clicked."
-      : "Opens Claude with the files you right-clicked; you say what to do with them. Shift+click it to choose where.";
+      : modes.length > 1
+        ? "Opens Claude with the files you right-clicked; you say what to do with them. Shift+click it to choose where."
+        : `Starts a new ${modes[0].id === "code" ? "Claude Code session" : "Claude chat"} with the files you right-clicked; you say what to do with them.`;
   const current = (modes.find((m) => m.id === s.askMode) || modes[0] || {}).id;
   $("ask-modes").innerHTML = modes.map((m) =>
     `<button type="button" class="radio top" role="radio" data-ask="${m.id}" aria-checked="${m.id === current}"><span class="dot"></span>` +
@@ -845,7 +846,7 @@ function demoInvoke(cmd, args) {
   const d = (window.__demo = window.__demo || {
     settings: {
       shortcut: "ctrl+alt+shift+KeyC", altClick: true, startAtLogin: true, progressRing: true, saveMode: "next", saveFolder: null,
-      handoffSeconds: 2, learn: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {}, aiApps: true, aiCard: true, askClaude: true, askMode: "cowork",
+      handoffSeconds: 2, learn: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {}, aiApps: true, aiCard: true, askClaude: true, askMode: "chat",
     },
     shortcut: "ctrl+alt+shift+KeyC",
     families: [

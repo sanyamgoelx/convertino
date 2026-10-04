@@ -1,19 +1,21 @@
 //! "Ask Claude" on the wheel: opens Claude with the files you right-clicked,
 //! so you can tell it what to do with them (Claude then converts through
-//! Convertino's MCP server).
+//! Convertino's MCP server, on this computer).
 //!
 //! It uses Claude's own desktop links
 //! (https://support.claude.com/en/articles/14729294-open-claude-desktop-with-a-link):
 //!
-//! - Cowork: `claude://cowork/new?file=…&folder=…&q=…` attaches the files (Claude
-//!   asks the user to allow each one, so many files from one folder attach the
-//!   folder instead, and the message names the files).
-//! - Chat:   `claude://claude.ai/new?q=…` can only fill in text: the file paths.
-//! - Code:   `claude://code/new?folder=…&q=…` opens a Claude Code session in the files' folder.
+//! - Chat: `claude://claude.ai/new?q=…` starts a new chat with the file paths
+//!   written in; Claude Desktop runs Convertino right here.
+//! - Code: `claude://code/new?folder=…&q=…` opens a Claude Code session in the files' folder.
+//!
+//! No Cowork: a Cowork task runs in the cloud and reaches this computer only
+//! while Claude Desktop's link to it is up; tried on 4 Oct 2026, the attached
+//! file never arrived ("can't reach your computer"). Chat did the same job.
 //!
 //! The button shows only when Convertino is connected to Claude (Claude
-//! Desktop for Cowork and Chat, Claude Code for Code) and AI apps are allowed
-//! in Settings: without the connection Claude couldn't convert anything.
+//! Desktop for Chat, Claude Code for Code) and AI apps are allowed in
+//! Settings: without the connection Claude couldn't convert anything.
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -23,17 +25,15 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
-    Cowork,
     Chat,
     Code,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 3] = [Mode::Cowork, Mode::Chat, Mode::Code];
+    pub const ALL: [Mode; 2] = [Mode::Chat, Mode::Code];
 
     pub fn id(self) -> &'static str {
         match self {
-            Mode::Cowork => "cowork",
             Mode::Chat => "chat",
             Mode::Code => "code",
         }
@@ -45,7 +45,6 @@ impl Mode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Mode::Cowork => "Cowork",
             Mode::Chat => "Chat",
             Mode::Code => "Claude Code",
         }
@@ -54,9 +53,8 @@ impl Mode {
     /// What it does with the files, for the wheel's hint and Settings.
     pub fn does(self) -> &'static str {
         match self {
-            Mode::Cowork => "attaches the files",
-            Mode::Chat => "writes the file paths into a new chat",
-            Mode::Code => "opens a session in the files' folder",
+            Mode::Chat => "Starts a new chat with the file paths written in",
+            Mode::Code => "Opens a Claude Code session in the files' folder",
         }
     }
 }
@@ -73,7 +71,6 @@ impl Connected {
     pub fn modes(self) -> Vec<Mode> {
         let mut m = Vec::new();
         if self.desktop {
-            m.push(Mode::Cowork);
             m.push(Mode::Chat);
         }
         if self.code {
@@ -165,8 +162,6 @@ pub fn for_wheel(prefs: &crate::settings::Settings, connected: Connected) -> Opt
 
 // ---------- the link ----------
 
-/// Up to this many files attach one by one (Claude asks to allow each).
-pub const MAX_FILES: usize = 5;
 /// Kept well under what Windows passes to the app that opens the link.
 const MAX_LINK: usize = 8000;
 
@@ -208,18 +203,6 @@ fn home_of(p: &Path) -> PathBuf {
     }
 }
 
-/// The folders the items are in, in order of first appearance.
-fn folders(items: &[PathBuf]) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = Vec::new();
-    for p in items {
-        let f = home_of(p);
-        if !out.contains(&f) {
-            out.push(f);
-        }
-    }
-    out
-}
-
 /// The deepest folder all the items are in.
 fn common_folder(items: &[PathBuf]) -> Option<PathBuf> {
     let mut it = items.iter().map(|p| home_of(p));
@@ -258,36 +241,9 @@ fn names(items: &[PathBuf], budget: usize) -> String {
 /// The link that opens Claude with `items` (files or folders, absolute paths).
 pub fn link(mode: Mode, items: &[PathBuf]) -> String {
     match mode {
-        Mode::Cowork => cowork_link(items),
         Mode::Chat => chat_link(items),
         Mode::Code => code_link(items),
     }
-}
-
-fn cowork_link(items: &[PathBuf]) -> String {
-    const BASE: &str = "claude://cowork/new";
-    let files: Vec<&PathBuf> = items.iter().filter(|p| !p.is_dir()).collect();
-    let dirs: Vec<&PathBuf> = items.iter().filter(|p| p.is_dir()).collect();
-    // A few things: attach each one.
-    if items.len() <= MAX_FILES {
-        let mut params: Vec<(&str, String)> = dirs.iter().map(|d| ("folder", path_str(d))).collect();
-        params.extend(files.iter().map(|f| ("file", path_str(f))));
-        let url = query(BASE, &params);
-        if url.len() <= MAX_LINK {
-            return url;
-        }
-    }
-    // Many: attach their folders (one approval each) and say which files.
-    let mut fs = folders(items);
-    fs.truncate(MAX_FILES);
-    let mut params: Vec<(&str, String)> = fs.iter().map(|d| ("folder", path_str(d))).collect();
-    let picked: Vec<PathBuf> = files.iter().map(|p| (*p).clone()).collect();
-    if !picked.is_empty() {
-        let used = query(BASE, &params).len() + 40;
-        let budget = MAX_LINK.saturating_sub(used) / 3;
-        params.push(("q", format!("The files I picked ({}): {}\n\n", picked.len(), names(&picked, budget.max(60)))));
-    }
-    query(BASE, &params)
 }
 
 fn chat_link(items: &[PathBuf]) -> String {
@@ -402,18 +358,20 @@ mod tests {
     #[test]
     fn modes_follow_what_is_connected() {
         assert!(Connected::default().modes().is_empty());
-        assert_eq!(Connected { desktop: true, code: false }.modes(), vec![Mode::Cowork, Mode::Chat]);
+        assert_eq!(Connected { desktop: true, code: false }.modes(), vec![Mode::Chat]);
         assert_eq!(Connected { desktop: false, code: true }.modes(), vec![Mode::Code]);
-        assert_eq!(Connected { desktop: true, code: true }.modes(), vec![Mode::Cowork, Mode::Chat, Mode::Code]);
+        assert_eq!(Connected { desktop: true, code: true }.modes(), vec![Mode::Chat, Mode::Code]);
     }
 
     #[test]
     fn the_mode_in_settings_falls_back_to_one_that_works() {
-        let both = [Mode::Cowork, Mode::Chat, Mode::Code];
-        assert_eq!(pick_mode("chat", &both), Some(Mode::Chat));
-        assert_eq!(pick_mode("cowork", &[Mode::Code]), Some(Mode::Code));
-        assert_eq!(pick_mode("nonsense", &both), Some(Mode::Cowork));
-        assert_eq!(pick_mode("cowork", &[]), None);
+        let both = [Mode::Chat, Mode::Code];
+        assert_eq!(pick_mode("code", &both), Some(Mode::Code));
+        assert_eq!(pick_mode("chat", &[Mode::Code]), Some(Mode::Code));
+        // Cowork was a mode until 4 Oct 2026: settings that still say so get Chat.
+        assert_eq!(pick_mode("cowork", &both), Some(Mode::Chat));
+        assert_eq!(pick_mode("nonsense", &both), Some(Mode::Chat));
+        assert_eq!(pick_mode("chat", &[]), None);
     }
 
     #[test]
@@ -422,8 +380,8 @@ mod tests {
         let desk = Connected { desktop: true, code: false };
         assert!(for_wheel(&s, Connected::default()).is_none(), "nothing connected: no button");
         let w = for_wheel(&s, desk).unwrap();
-        assert_eq!(w.default, "cowork");
-        assert_eq!(w.modes.iter().map(|m| m.id).collect::<Vec<_>>(), vec!["cowork", "chat"]);
+        assert_eq!(w.default, "chat");
+        assert_eq!(w.modes.iter().map(|m| m.id).collect::<Vec<_>>(), vec!["chat"]);
         s.ai_apps = false;
         assert!(for_wheel(&s, desk).is_none(), "AI apps turned off: no button");
         s.ai_apps = true;
@@ -431,52 +389,18 @@ mod tests {
         assert!(for_wheel(&s, desk).is_none(), "button turned off");
         s.ask_claude = true;
         s.ask_mode = "code".into();
-        assert_eq!(for_wheel(&s, desk).unwrap().default, "cowork", "Code isn't connected");
+        assert_eq!(for_wheel(&s, desk).unwrap().default, "chat", "Code isn't connected");
         assert_eq!(for_wheel(&s, Connected { desktop: true, code: true }).unwrap().default, "code");
     }
 
     #[test]
-    fn cowork_attaches_a_few_files_one_by_one() {
-        let (_t, ps) = tmp("few", &["IMG 0411.CR3", "IMG_0412.CR3", "notes & ideas.txt"]);
-        let url = link(Mode::Cowork, &ps);
-        assert!(url.starts_with("claude://cowork/new?"), "{url}");
-        let p = params(&url);
-        assert_eq!(p.len(), 3);
-        assert!(p.iter().all(|(k, _)| k == "file"));
-        assert_eq!(p[0].1, path_str(&ps[0]), "spaces and & come back exactly");
-        assert_eq!(p[2].1, path_str(&ps[2]));
-        assert!(!url.contains(' ') && !url[url.find('?').unwrap() + 1..].contains("&&"));
-    }
-
-    #[test]
-    fn cowork_attaches_the_folder_for_many_files() {
-        let names: Vec<String> = (1..=24).map(|i| format!("IMG_{i:04}.CR3")).collect();
-        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        let (t, ps) = tmp("many", &refs);
-        let url = link(Mode::Cowork, &ps);
-        let p = params(&url);
-        assert_eq!(p[0], ("folder".to_string(), path_str(&t.0)));
-        assert_eq!(p.iter().filter(|(k, _)| k == "folder").count(), 1);
-        let q = &p.iter().find(|(k, _)| k == "q").unwrap().1;
-        assert!(q.starts_with("The files I picked (24): IMG_0001.CR3, IMG_0002.CR3"), "{q}");
-        assert!(q.contains("IMG_0024.CR3"), "all 24 fit: {q}");
-    }
-
-    #[test]
-    fn cowork_attaches_a_selected_folder_as_a_folder() {
-        let (t, _) = tmp("dir", &["Trip/a.jpg"]);
-        let dir = t.0.join("Trip");
-        let p = params(&link(Mode::Cowork, std::slice::from_ref(&dir)));
-        assert_eq!(p, vec![("folder".to_string(), path_str(&dir))]);
-    }
-
-    #[test]
     fn chat_writes_the_paths() {
-        let (_t, ps) = tmp("chat", &["a.pdf", "b c.pdf"]);
+        let (_t, ps) = tmp("chat", &["a.pdf", "b c & d.pdf"]);
         let url = link(Mode::Chat, &ps);
         assert!(url.starts_with("claude://claude.ai/new?q="), "{url}");
         let q = &params(&url)[0].1;
-        assert_eq!(q, &format!("{}\n{}\n\n", path_str(&ps[0]), path_str(&ps[1])));
+        assert_eq!(q, &format!("{}\n{}\n\n", path_str(&ps[0]), path_str(&ps[1])), "spaces and & come back exactly");
+        assert!(!url.contains(' '));
     }
 
     #[test]
@@ -490,8 +414,6 @@ mod tests {
         }
         let q = params(&link(Mode::Chat, &ps))[0].1.clone();
         assert!(q.contains("more in "), "says how many are left out: {}", &q[q.len() - 120..]);
-        let q = params(&link(Mode::Cowork, &ps)).into_iter().find(|(k, _)| k == "q").unwrap().1;
-        assert!(q.starts_with("The files I picked (900):") && q.contains(" more"), "{}", &q[..80]);
     }
 
     #[test]

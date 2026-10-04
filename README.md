@@ -80,14 +80,14 @@ in Settings turns AI access off.
 **No paths to type.** Two ways to give Claude your files:
 
 - **Ask Claude on the wheel** (key **C**): Alt+right-click files (Option+right-click
-  on a Mac) and click **Ask Claude** under the ring. Claude opens with the files
-  attached and the cursor in the message box; say what you want ("make these JPGs
-  under 1 MB each"). Shift+click picks where it opens: **Cowork** (attaches the
-  files; from 6 files on it attaches their folder, so you approve once), **Chat**
-  (writes the file paths into a new chat) or **Claude Code** (a session in the files'
-  folder). The button only shows once Convertino is connected to Claude.
+  on a Mac) and click **Ask Claude** under the ring. A new Claude chat opens with
+  the file paths written in and the cursor after them; say what you want ("make
+  these JPGs under 1 MB each"). Claude Desktop runs Convertino on this computer.
+  With Claude Code connected too, Shift+click offers a Claude Code session in the
+  files' folder instead. The button only shows once Convertino is connected to Claude.
 - **Connect a folder** to a Cowork task in Claude (+ Add folder) and ask about the
-  files in it: "turn every RAW photo in here into a JPG".
+  files in it: "turn every RAW photo in here into a JPG". This needs Claude to be
+  linked to your computer.
 
 ## Support
 

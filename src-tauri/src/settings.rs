@@ -116,7 +116,7 @@ pub struct Settings {
     pub ai_card: bool,
     /// "Ask Claude" on the wheel (shown only when Convertino is connected to Claude).
     pub ask_claude: bool,
-    /// Where Ask Claude opens: "cowork", "chat" or "code" (see ask.rs).
+    /// Where Ask Claude opens: "chat" or "code" (see ask.rs; "cowork" from before 4 Oct 2026 becomes "chat").
     pub ask_mode: String,
     /// Settings format. Files without it are from before version 2.
     #[serde(default)]
@@ -145,7 +145,7 @@ impl Default for Settings {
             ai_apps: true,
             ai_card: true,
             ask_claude: true,
-            ask_mode: "cowork".into(),
+            ask_mode: "chat".into(),
             version: VERSION,
         }
     }
@@ -162,7 +162,7 @@ impl Settings {
             self.ffmpeg_build = "gpl".into();
         }
         if crate::ask::Mode::from_id(&self.ask_mode).is_none() {
-            self.ask_mode = "cowork".into();
+            self.ask_mode = "chat".into();
         }
         self
     }
@@ -396,6 +396,16 @@ mod tests {
         assert_eq!(s.quality.webp, 85);
         assert_eq!(s.handoff_seconds, 2);
         assert!(s.progress_ring);
+    }
+
+    #[test]
+    fn ask_claude_cowork_becomes_chat() {
+        // Cowork was an Ask Claude mode until 4 Oct 2026.
+        let s: Settings = serde_json::from_str(r#"{"askMode":"cowork"}"#).unwrap();
+        assert_eq!(s.clamped().ask_mode, "chat");
+        let s: Settings = serde_json::from_str(r#"{"askMode":"code"}"#).unwrap();
+        assert_eq!(s.clamped().ask_mode, "code");
+        assert_eq!(Settings::default().ask_mode, "chat");
     }
 
     #[test]
