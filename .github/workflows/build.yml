@@ -126,6 +126,12 @@ jobs:
           CONVERTINO_REPORT_WEBHOOK: ${{ secrets.CONVERTINO_REPORT_WEBHOOK }}
         run: npx tauri build
 
+      # hdiutil (making the .dmg) fails now and then with "Resource busy" on GitHub's
+      # Macs while XProtect scans the new image: stop XProtect first.
+      - name: Make room for the disk image (Mac)
+        if: runner.os == 'macOS'
+        run: sudo pkill -9 XProtect >/dev/null 2>&1 || true
+
       - name: Build app and installers (Mac)
         if: runner.os == 'macOS'
         env:
@@ -133,7 +139,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CONVERTINO_REPORT_WEBHOOK: ${{ secrets.CONVERTINO_REPORT_WEBHOOK }}
         run: |
-          npx tauri build --bundles app,dmg
+          # Making the .dmg can still fail at random: try up to 3 times (the app itself is built once).
+          for try in 1 2 3; do
+            npx tauri build --bundles app,dmg && break
+            if [ "$try" = 3 ]; then exit 1; fi
+            echo "::warning::Building the Mac installer failed (try $try of 3); trying again"
+            sudo pkill -9 XProtect >/dev/null 2>&1 || true
+            sleep 15
+          done
           app=$(ls -d src-tauri/target/release/bundle/macos/*.app)
           echo "Converters inside the app:"
           ls "$app/Contents/Resources/tools"

@@ -86,4 +86,4 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - CI: run 37175841321 green (Windows, both Macs, install checks).
 - To check on the PC: Ask Claude with 1, 3 and 10 files in Claude Desktop (does Cowork attach several `file=` at once? does the folder prompt show once?).
 - 4 Oct, tried on the PC: **Cowork mode failed** (the Cowork task runs in the cloud; the attached JPG never got copied over, "can't reach your computer"), **Chat mode worked**. User agreed to drop Cowork: modes are now **Chat** (default; Claude Desktop) and **Claude Code**. Settings saying "cowork" become "chat". The Open in choice only shows when both Claude apps are connected. Connect a folder in Cowork stays documented as the other way (needs Claude linked to the computer).
-
+- CI 4 Oct (635a2e3): Windows green; Apple silicon failed making the .dmg (`bundle_dmg.sh`, hdiutil "Resource busy", random on GitHub's Macs). Fix: Build stops XProtect first and retries the Mac build up to 3 times; Release stops XProtect and uses tauri-action `retryAttempts: 2`.

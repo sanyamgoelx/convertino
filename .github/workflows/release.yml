@@ -80,6 +80,12 @@ jobs:
           CONVERTINO_REPORT_WEBHOOK: ${{ secrets.CONVERTINO_REPORT_WEBHOOK }}
         run: cargo build --release --bin convertino-cli
 
+      # hdiutil (making the .dmg) fails now and then with "Resource busy" on GitHub's
+      # Macs while XProtect scans the new image: stop XProtect first.
+      - name: Make room for the disk image (Mac)
+        if: runner.os == 'macOS'
+        run: sudo pkill -9 XProtect >/dev/null 2>&1 || true
+
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -106,6 +112,8 @@ jobs:
           # Download link follow "latest", which skips pre-releases.
           prerelease: ${{ contains(github.ref_name, '-') }}
           updaterJsonPreferNsis: true
+          # Making the .dmg fails at random now and then on GitHub's Macs.
+          retryAttempts: 2
           args: ${{ runner.os == 'macOS' && '--bundles app,dmg' || '' }}
 
   # The published files, downloaded and installed the way people get them.
