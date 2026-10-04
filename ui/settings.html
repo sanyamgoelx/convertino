@@ -202,6 +202,17 @@ convertino formats report.docx</pre>
         <button type="button" class="switch" role="switch" data-key="aiCard" aria-labelledby="aicard-title"><span></span></button>
       </div>
 
+      <h2 class="perm-head ai-gap">Ask Claude from the wheel</h2>
+      <div class="card" id="ask-card">
+        <div class="row">
+          <svg class="ic accent" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>
+          <div class="grow"><div id="ask-title">Show Ask Claude on the wheel</div><div class="sub" id="ask-sub">Opens Claude with the files you right-clicked; you say what to do with them</div></div>
+          <span class="state" data-state-for="askClaude" id="ask-state"></span>
+          <button type="button" class="switch" role="switch" data-key="askClaude" aria-labelledby="ask-title" id="ask-switch"><span></span></button>
+        </div>
+        <div class="radios divider" role="radiogroup" aria-label="Ask Claude opens in" id="ask-modes"></div>
+      </div>
+
       <h2 class="perm-head ai-gap">Recent AI jobs</h2>
       <div class="card list" id="ai-jobs"></div>
     </section>

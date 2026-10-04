@@ -377,3 +377,7 @@ section { max-width: 820px; margin: 0 auto; gap: 8px; }
 .ai-empty { padding: 14px 18px; }
 :root[data-os="mac"] .code { border-radius: 8px; }
 :root[data-os="mac"] .app-ic { width: 30px; height: 30px; }
+
+/* Ask Claude: its switch and choices show only once Convertino is connected to Claude. */
+#ask-card [hidden] { display: none !important; }
+#ask-card.off .ic.accent { opacity: 0.5; }

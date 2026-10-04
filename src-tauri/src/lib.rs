@@ -11,6 +11,7 @@
 
 mod accent;
 mod ai;
+mod ask;
 mod archive;
 mod cli;
 mod compare;
@@ -62,7 +63,7 @@ const HOTKEY_CANDIDATES: &[&str] = &["ctrl+alt+c", "ctrl+alt+shift+c", "ctrl+alt
 /// Wheel window size and where the wheel's centre sits inside it (logical px).
 /// Keep in sync with ui/wheel.css.
 const WHEEL_WIN_W: f64 = 420.0;
-const WHEEL_WIN_H: f64 = 460.0;
+const WHEEL_WIN_H: f64 = 490.0;
 const WHEEL_CX: f64 = 210.0;
 const WHEEL_CY: f64 = 190.0;
 
@@ -211,6 +212,33 @@ fn wheel_pick(
         }
     }
     id
+}
+
+/// Ask Claude on the wheel: opens Claude with everything that was selected.
+/// `mode`: Shift+click's choice (None: the one in Settings); `remember`: keep it in Settings.
+#[tauri::command]
+fn ask_claude(app: AppHandle, state: tauri::State<'_, AppState>, mode: Option<String>, remember: Option<bool>) -> Result<(), String> {
+    hide_wheel(&app);
+    let model = state.wheel.lock().ok().and_then(|w| w.clone()).ok_or("The wheel was closed")?;
+    let ask_ui = model.ask.as_ref().ok_or("Convertino isn't connected to Claude")?;
+    let available: Vec<ask::Mode> = ask_ui.modes.iter().filter_map(|m| ask::Mode::from_id(m.id)).collect();
+    let chosen = ask::pick_mode(mode.as_deref().unwrap_or(ask_ui.default), &available).ok_or("Convertino isn't connected to Claude")?;
+    if remember == Some(true) {
+        settings::update(|s| s.ask_mode = chosen.id().into());
+        settings_changed(&app);
+    }
+    let items: Vec<PathBuf> = model.selected.iter().map(PathBuf::from).filter(|p| p.exists()).collect();
+    if items.is_empty() {
+        return Err("The files aren't there any more".into());
+    }
+    let url = ask::link(chosen, &items);
+    log::info!("ask claude: {} with {} item(s), {} chars", chosen.id(), items.len(), url.len());
+    ask::open(&url).map_err(|e| {
+        log::warn!("ask claude: couldn't open the link: {e}");
+        show_hud(&app);
+        let _ = app.emit_to("hud", "notice", Notice { title: "Couldn't open Claude".into(), body: format!("Is the Claude app installed? ({e})") });
+        e
+    })
 }
 
 /// The open wheel's files a target works on.
@@ -1190,6 +1218,10 @@ fn open_for_selection(
                     model.pending_dialog = pending_dialog;
                     model.hub_subtitle = "Converts after you click Save".into();
                 }
+                // Ask Claude needs files that exist (not one a Save dialog is about to write).
+                if pending_dialog.is_none() {
+                    model.ask = ask::for_wheel(&settings::get(), ask::connected());
+                }
                 let app2 = app.clone();
                 // Window work must happen on the main thread.
                 let _ = app.run_on_main_thread(move || open_wheel(&app2, model, cursor));
@@ -1342,6 +1374,7 @@ pub fn run() {
             editor_close,
             job_reveal,
             job_cancel,
+            ask_claude,
             ai::ai_status,
             ai::ai_connect,
             ai::ai_setup_snippet,

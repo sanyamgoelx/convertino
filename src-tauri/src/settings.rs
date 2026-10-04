@@ -114,6 +114,10 @@ pub struct Settings {
     pub ai_apps: bool,
     /// A corner card shows while an AI app converts.
     pub ai_card: bool,
+    /// "Ask Claude" on the wheel (shown only when Convertino is connected to Claude).
+    pub ask_claude: bool,
+    /// Where Ask Claude opens: "cowork", "chat" or "code" (see ask.rs).
+    pub ask_mode: String,
     /// Settings format. Files without it are from before version 2.
     #[serde(default)]
     pub version: u32,
@@ -140,6 +144,8 @@ impl Default for Settings {
             picks: BTreeMap::new(),
             ai_apps: true,
             ai_card: true,
+            ask_claude: true,
+            ask_mode: "cowork".into(),
             version: VERSION,
         }
     }
@@ -154,6 +160,9 @@ impl Settings {
         }
         if self.ffmpeg_build != "lgpl" {
             self.ffmpeg_build = "gpl".into();
+        }
+        if crate::ask::Mode::from_id(&self.ask_mode).is_none() {
+            self.ask_mode = "cowork".into();
         }
         self
     }

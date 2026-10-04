@@ -228,6 +228,7 @@ function render() {
     el.setAttribute("aria-checked", String(!!s[el.dataset.key]));
   });
   document.querySelectorAll("[data-state-for]").forEach((el) => { el.textContent = s[el.dataset.stateFor] ? "On" : "Off"; });
+  renderAsk();
   if (isMac()) {
     $("alt-title").textContent = "Option-right-click on files";
     $("hero-key").textContent = "\u2325 Option";
@@ -723,6 +724,8 @@ function renderAi() {
     $("ai-sub").textContent = $("ai-sub").textContent.replace("this computer", "your Mac");
   }
 
+  renderAsk();
+
   const jobs = ai.jobs || [];
   $("ai-jobs").innerHTML = jobs.length
     ? jobs.map((j, i) => `<div class="item"><div class="grow"><div>${esc(j.what)}</div><div class="sub">${esc(j.client)} · ${ago(j.at)}${j.folder ? " · " + esc(j.folder.split(/[\\/]/).pop()) : ""}</div></div>` +
@@ -731,6 +734,40 @@ function renderAi() {
       `<div class="item"><span class="grow sub">Kept on this computer only</span><button type="button" class="btn" id="ai-clear">Clear</button></div>`
     : `<div class="sub ai-empty">Nothing yet. Jobs an AI app asks for show here.</div>`;
 }
+
+// Ask Claude: shown on the wheel only when Convertino is connected to Claude
+// (Claude Desktop for Cowork and Chat, Claude Code for Code); see ask.rs.
+const ASK_MODES = [
+  { id: "cowork", app: "claude-desktop", name: "Cowork", sub: "Attaches the files. Claude sees them and converts on this computer. Best for most things." },
+  { id: "chat", app: "claude-desktop", name: "Chat", sub: "Writes the file paths into a new chat" },
+  { id: "code", app: "claude-code", name: "Claude Code", sub: "Opens a session in the files' folder" },
+];
+
+function renderAsk() {
+  if (!ai || !view) return;
+  const s = view.settings;
+  const on = (id) => ai.apps.some((a) => a.id === id && a.connected);
+  const modes = ASK_MODES.filter((m) => on(m.app));
+  const usable = modes.length > 0 && s.aiApps;
+  $("ask-switch").hidden = !usable;
+  $("ask-state").hidden = !usable;
+  $("ask-modes").hidden = !usable || !s.askClaude || modes.length < 2;
+  $("ask-card").classList.toggle("off", !usable);
+  $("ask-sub").textContent = !s.aiApps
+    ? "Turned off with “Let AI apps convert files” above"
+    : !modes.length
+      ? "Connect Convertino to Claude Desktop or Claude Code above, and an Ask Claude button appears on the wheel: it opens Claude with the files you right-clicked."
+      : "Opens Claude with the files you right-clicked; you say what to do with them. Shift+click it to choose where.";
+  const current = (modes.find((m) => m.id === s.askMode) || modes[0] || {}).id;
+  $("ask-modes").innerHTML = modes.map((m) =>
+    `<button type="button" class="radio top" role="radio" data-ask="${m.id}" aria-checked="${m.id === current}"><span class="dot"></span>` +
+    `<span><span class="blk">${esc(m.name)}</span><span class="blk sub">${esc(m.sub)}</span></span></button>`).join("");
+}
+
+$("ask-modes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ask]");
+  if (b) save({ askMode: b.dataset.ask });
+});
 
 $("ai-apps").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-app]");
@@ -808,7 +845,7 @@ function demoInvoke(cmd, args) {
   const d = (window.__demo = window.__demo || {
     settings: {
       shortcut: "ctrl+alt+shift+KeyC", altClick: true, startAtLogin: true, progressRing: true, saveMode: "next", saveFolder: null,
-      handoffSeconds: 2, learn: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {}, aiApps: true, aiCard: true,
+      handoffSeconds: 2, learn: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {}, aiApps: true, aiCard: true, askClaude: true, askMode: "cowork",
     },
     shortcut: "ctrl+alt+shift+KeyC",
     families: [

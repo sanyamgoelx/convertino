@@ -1,4 +1,4 @@
-/* Wheel window: 420 × 460 logical px, fully transparent.
+/* Wheel window: 420 × 490 logical px, fully transparent.
    The wheel (340 px) is centred at (210, 190); keep in sync with lib.rs. */
 :root {
   --d: 340px;
@@ -282,3 +282,31 @@ body.with-opts .wheel { opacity: 0.55; transition: opacity 0.15s; }
 .size-hub button:focus-visible, .hint-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root[data-os="mac"] .hint-btn { border-radius: 7px; }
 .ring.wide .ring-text { max-width: 130px; }
+
+/* Ask Claude: a pill on the wheel's bottom edge (only when Convertino is
+   connected to Claude). The hint moves down to make room. */
+.ask {
+  position: absolute; left: 50%; top: calc(var(--d) - 20px); transform: translateX(-50%);
+  height: 36px; padding: 0 10px 0 11px; border-radius: 18px;
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--accent-fg); cursor: pointer;
+  background: var(--hub-bg); border: 1px solid var(--surface-line);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+  opacity: 0; transition: opacity 0.18s ease-out 0.05s, border-color 0.12s, background 0.12s;
+}
+.wheel.open .ask { opacity: 1; }
+.ask svg { color: var(--accent-fg); }
+.ask .key { font: 10px var(--mono); color: var(--ink-3); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-weight: 400; }
+.ask.on { border-color: var(--accent-fg); background: color-mix(in srgb, var(--accent) 10%, var(--hub-bg)); }
+.ask:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root[data-os="mac"] .ask.on { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+:root[data-os="mac"] .ask.on svg, :root[data-os="mac"] .ask.on .key { color: var(--on-accent); }
+body.with-ask .hint { top: 394px; }
+
+.opts-modes { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.opts-modes legend { padding: 0; margin-bottom: 6px; font-size: 12.5px; color: var(--ink-2); }
+.opts-mode { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--surface-line); cursor: pointer; }
+.opts-mode:has(input:checked) { border-color: var(--accent-fg); background: var(--accent-soft); }
+.opts-mode input { margin: 2px 0 0; accent-color: var(--accent); }
+.opts-mode > span { display: flex; flex-direction: column; gap: 1px; }
+.opts-mode > span > span { font-size: 12px; color: var(--ink-2); }

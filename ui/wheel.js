@@ -29,6 +29,7 @@ const ICONS = {
   pdf: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M8.5 16.5c2-1 4.5-5.5 3.5-6.5s-1 3 3.5 5"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13.5" r="3.2"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
 };
 const icon = (name, size = 20) =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.doc}</svg>`;
@@ -92,9 +93,52 @@ function draw() {
     })
     .join("");
   const hub = size ? sizeHub() : `<div class="hub">${fileTile(model.hubColor)}<div class="hn" title="${esc(model.hubTitle)}">${esc(model.hubTitle)}</div><div class="hm">${esc(model.hubSubtitle)}</div></div>`;
-  wheelEl.innerHTML = `<svg viewBox="0 0 ${D} ${D}" aria-hidden="true">${segs}</svg>${labels}${hub}`;
+  const askBtn = showAsk() ? `<button type="button" class="ask" id="ask" aria-label="Ask Claude about ${esc(selectedWords())}">${icon("spark", 18)}<span>Ask Claude</span><span class="key">C</span></button>` : "";
+  document.body.classList.toggle("with-ask", !!askBtn);
+  wheelEl.innerHTML = `<svg viewBox="0 0 ${D} ${D}" aria-hidden="true">${segs}</svg>${labels}${hub}${askBtn}`;
   if (size) wireSizeHub();
   setActive(size && size.custom ? slots.length - 1 : -1);
+}
+
+// ---------- Ask Claude ----------
+// Shown only when Convertino is connected to Claude (Rust sends model.ask).
+// A click opens Claude with everything that was selected; Shift+click (or
+// Shift+C) asks where: Cowork, Chat or Claude Code.
+
+let askHover = false;
+const showAsk = () => !!(model && model.ask && !size);
+const selectedCount = () => (model ? model.files.length + model.skipped.length : 0);
+function selectedWords() {
+  const n = selectedCount();
+  return n === 1 ? (model.files[0] ? model.files[0].name : model.hubTitle) : `these ${n} items`;
+}
+const askMode = (id) => (model.ask.modes.find((m) => m.id === id) || model.ask.modes[0]);
+
+function askHint() {
+  const m = askMode(model.ask.default);
+  const more = model.ask.modes.length > 1 ? " · Shift+click to choose where" : "";
+  hintEl.innerHTML = `<span class="ht">Ask Claude</span>` +
+    `<span class="hs">Opens Claude (${esc(m.label)}) and ${esc(m.does.replace("the files", selectedCount() === 1 ? "the file" : `the ${selectedCount()} files`))}</span>` +
+    `<span class="hk">Click or press C${more}</span>`;
+}
+
+function setAskHover(on) {
+  if (askHover === on) return;
+  askHover = on;
+  const b = document.getElementById("ask");
+  if (b) b.classList.toggle("on", on);
+  if (on) { active = -1; wheelEl.querySelectorAll("[data-i]").forEach((el) => el.classList.remove("on")); askHint(); }
+  else setActive(active);
+}
+
+function ask(withChoice) {
+  if (busy || !showAsk()) return;
+  if (withChoice && model.ask.modes.length > 1) return showAskOptions();
+  askGo(null, false);
+}
+
+function askGo(mode, remember) {
+  animateOut(() => tauri && tauri.core.invoke("ask_claude", { mode, remember }).catch((e) => console.error(e)));
 }
 
 function setActive(i) {
@@ -130,6 +174,7 @@ function open(m) {
   if (m.accent) document.documentElement.style.setProperty("--accent", m.accent);
   page = "main";
   size = null;
+  askHover = false;
   slots = m.main;
   wheelEl.classList.remove("open", "closing");
   hintEl.classList.remove("show");
@@ -225,6 +270,9 @@ function showOptions(s) {
   const q = Object.assign({}, DEFAULT_Q, (model && model.quality) || {});
   optsFor = { slot: s, q };
   document.getElementById("opts-title").textContent = s.label;
+  document.getElementById("opts-go").textContent = "Convert";
+  document.querySelector(".opts-sub").textContent = "for this conversion";
+  optsKeep.nextElementSibling.textContent = "Use these every time";
   optsKeep.checked = false;
   optsFields.innerHTML = OPTIONS[s.id].map((key) => {
     const f = FIELDS[key];
@@ -242,6 +290,23 @@ function showOptions(s) {
   if (first) first.focus();
 }
 
+function showAskOptions() {
+  optsFor = { ask: true, mode: model.ask.default };
+  document.getElementById("opts-title").textContent = "Ask Claude";
+  document.getElementById("opts-go").textContent = "Open Claude";
+  document.querySelector(".opts-sub").textContent = `with ${selectedWords()}`;
+  optsKeep.nextElementSibling.textContent = "Use this every time";
+  optsKeep.checked = false;
+  optsFields.innerHTML = `<fieldset class="opts-modes"><legend>Open in</legend>` + model.ask.modes.map((m) =>
+    `<label class="opts-mode"><input type="radio" name="askmode" value="${esc(m.id)}"${m.id === model.ask.default ? " checked" : ""}>` +
+    `<span><b>${esc(m.label)}</b><span>${esc(m.does.charAt(0).toUpperCase() + m.does.slice(1))}</span></span></label>`).join("") + `</fieldset>`;
+  optsEl.hidden = false;
+  document.body.classList.add("with-opts");
+  hintEl.classList.remove("show");
+  const first = optsFields.querySelector("input:checked") || optsFields.querySelector("input");
+  if (first) first.focus();
+}
+
 function hideOptions() {
   optsFor = null;
   if (optsEl) optsEl.hidden = true;
@@ -250,6 +315,7 @@ function hideOptions() {
 
 if (optsEl) {
   optsFields.addEventListener("input", (e) => {
+    if (optsFor && optsFor.ask && e.target.name === "askmode") { optsFor.mode = e.target.value; return; }
     const k = e.target.dataset.k;
     if (!k || !optsFor) return;
     const raw = e.target.value;
@@ -260,8 +326,13 @@ if (optsEl) {
   optsEl.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!optsFor) return;
-    const { slot, q } = optsFor;
     const remember = optsKeep.checked;
+    if (optsFor.ask) {
+      const mode = optsFor.mode;
+      hideOptions();
+      return askGo(mode, remember);
+    }
+    const { slot, q } = optsFor;
     hideOptions();
     start(slot, q, remember);
   });
@@ -726,6 +797,9 @@ function indexAt(x, y) {
 document.addEventListener("pointermove", (e) => {
   if (!model || busy || ring || optsFor) return;
   if (size && e.target.closest && e.target.closest(".hub, .hint")) return;
+  const onAsk = !!(e.target.closest && e.target.closest(".ask"));
+  if (onAsk || askHover) setAskHover(onAsk);
+  if (onAsk) return;
   const i = indexAt(e.clientX, e.clientY);
   if (i !== active) setActive(i);
 });
@@ -736,6 +810,7 @@ document.addEventListener("click", (e) => {
   if (optsFor) { hideOptions(); hintEl.classList.add("show"); return; }
   // The size ring's centre and hint have their own buttons.
   if (size && e.target.closest && e.target.closest(".hub, .hint")) return;
+  if (e.target.closest && e.target.closest(".ask")) return ask(e.shiftKey);
   const i = indexAt(e.clientX, e.clientY);
   if (i >= 0) choose(i, e.shiftKey);
   else close(); // the hub or empty space
@@ -755,6 +830,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); return setActive(active <= 0 ? n - 1 : active - 1); }
   if (e.key === "Enter" && active >= 0) { e.preventDefault(); return choose(active, e.shiftKey); }
   if (e.key === "Backspace" && page === "more") { e.preventDefault(); return showPage("main"); }
+  if (e.code === "KeyC" && !e.ctrlKey && !e.metaKey && !e.altKey && showAsk()) { e.preventDefault(); return ask(e.shiftKey); }
   // Shift+1 types "!" on most keyboards: read the key's position instead.
   const digit = /^Digit([1-9])$/.exec(e.code);
   const k = digit ? Number(digit[1]) : parseInt(e.key, 10);
@@ -790,9 +866,14 @@ if (tauri) {
   open({
     os: /Mac/.test(navigator.platform) ? "mac" : "win",
     accent: null,
-    files: [], skipped: [],
+    files: [{ path: "C:\\Reports\\Q3-report.pdf", name: "Q3-report.pdf", ext: "pdf", family: "pdf", size: 2500000 }], skipped: [],
     hubTitle: "Q3-report.pdf", hubSubtitle: "PDF · 2.5 MB", hubFamily: "pdf", hubColor: "#C4262E",
     ring: true, handoffMs: 2000, quality: DEFAULT_Q,
+    ask: { default: "cowork", modes: [
+      { id: "cowork", label: "Cowork", does: "attaches the files" },
+      { id: "chat", label: "Chat", does: "writes the file paths into a new chat" },
+      { id: "code", label: "Claude Code", does: "opens a session in the files' folder" },
+    ] },
     main: [
       t("pdf.jpg", "JPG", "image", "One image per page · 150 DPI"),
       t("pdf.png", "PNG", "image", "Lossless image per page · 150 DPI"),

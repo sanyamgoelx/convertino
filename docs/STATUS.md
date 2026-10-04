@@ -63,7 +63,7 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - Compare: finished Compress jobs (not audio) get a Compare button (ring pill and corner card) → compare window (ui/compare.*, compare.rs): original vs result under a slider; video = middle frame, PDF = page 1.
 - Not adopted (user): re-checking the output and redoing it when it comes out over the size.
 
-## RAW photos, command line, MCP (3 Oct 2026, releasing as 0.2.0-rc.1, a pre-release)
+## RAW photos, command line, MCP (released 3 Oct 2026 as 0.2.0-rc.1, a pre-release)
 
 - Plan and how it was built: `docs/PLAN-RAW-CLI-MCP.md`. Mock-up (approved, "good to go"): https://claude.ai/artifact/MbTKhjexfYJjFktUAJy4Ga
 - RAW photo wheel (DNG, CR2/CR3, NEF, ARW, RAF, ORF, RW2, PEF, SRW, …): JPG, PNG, TIFF 16-bit, AVIF, WEBP, PDF, Compress, Camera JPG; EXIF copied.
@@ -73,5 +73,15 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - CI now: Windows tests too, RAW samples, and installs the built installers (Windows over the previous release, then uninstall; Mac from the .dmg). Releases: a version with "-" (0.2.0-rc.1) is a pre-release; "Release check" re-installs the published files and verifies latest.json signatures; release.cmd waits for a green Build run before tagging.
 - RAW on Mac: Homebrew builds ImageMagick with `--with-raw=no`, so its DNG coder reads nothing. The Mac bundle now ships LibRaw's `dcraw_emu` next to `magick` (ci/bundle-mac-tools.sh); raw.rs `develop_with_libraw` uses it when present (same settings: camera WB, sRGB, 16-bit), else ImageMagick; rawler stays the fallback. The real-RAW test requires LibRaw for DNG/NEF/ARW and lets rawler cover CR3/CRW/RAF when the LibRaw version can't.
 - CI (3 Oct): all green at 95093b7 (run 37128840130): Windows, Intel Mac, Apple silicon, and the install checks on Windows and Mac. ci-log.cmd now also reads runs that are still going.
-- 3 Oct: user said "Publish": version raised to 0.2.0-rc.1 (package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json), release.cmd run.
-- Next: when the Release and Release check runs are green, install 0.2.0-rc.1 from GitHub Releases and try Settings › AI & CLI; a final 0.2.0 later (installed copies only update to non-pre-releases). Computer use can't click while Valorant or Task Manager is in front.
+- 3 Oct: user said "Publish": version raised to 0.2.0-rc.1 (package.json, package-lock.json, Cargo.toml, Cargo.lock, tauri.conf.json), release.cmd run. Build da18d16 green, tag v0.2.0-rc.1 pushed, Release run 37134573580 green including Release check (installs on Windows, Intel Mac, Apple silicon; updater files verify). https://github.com/sanyamgoelx/convertino/releases/tag/v0.2.0-rc.1
+- Next: install 0.2.0-rc.1 from GitHub Releases and try Settings › AI & CLI; a final 0.2.0 later (installed copies only update to non-pre-releases). Computer use can't click while Valorant or Task Manager is in front.
+
+## Ask Claude (4 Oct 2026, built, not released)
+
+- Design: boards 6–9 on https://claude.ai/artifact/MbTKhjexfYJjFktUAJy4Ga (approved: "Build now"; the button shows only when Convertino is connected to Claude).
+- Wheel: an **Ask Claude** pill on the ring's bottom edge (key C; Shift+click / Shift+C: Cowork, Chat or Claude Code, "Use this every time"). Hidden in the size ring, for Save-dialog conversions, when AI apps are off, when the setting is off, and when no Claude app has Convertino connected (Cowork/Chat need Claude Desktop, Code needs Claude Code). Window 420 × 490 (was 460); the hint moves to 394 px.
+- `src-tauri/src/ask.rs`: Claude's desktop links (support.claude.com "Open Claude Desktop with a link"): `claude://cowork/new?file=…&folder=…&q=…` (≤5 items one by one, more: their folders + "The files I picked (N): …"), `claude://claude.ai/new?q=<paths>`, `claude://code/new?folder=<common folder>&q=Files: …`. Links capped at 8000 chars. Connection state cached 15 s, refreshed at startup and after Connect/Disconnect. Opened with rundll32 url.dll (Windows) / `open` (Mac). Everything selected goes, folders and unknown files too.
+- Settings › AI & CLI: "Ask Claude from the wheel" (switch + Open in: Cowork / Chat / Claude Code, only the connected ones); without a connection it says to connect first. Settings keys `askClaude`, `askMode`.
+- Tests: 10 in ask.rs (modes, visibility, link shapes, encoding of spaces and &, length caps, folder attach). Unit tests 117 pass on Linux.
+- To check on the PC: Ask Claude with 1, 3 and 10 files in Claude Desktop (does Cowork attach several `file=` at once? does the folder prompt show once?).
+

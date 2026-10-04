@@ -154,6 +154,11 @@ pub struct WheelModel {
     /// A Save dialog whose file the conversion waits for (see selection::Selection).
     #[serde(skip)]
     pub pending_dialog: Option<isize>,
+    /// The Ask Claude button (None: hidden; see ask.rs).
+    pub ask: Option<crate::ask::WheelAsk>,
+    /// Everything that was selected, folders and unknown files too (what Ask Claude sends).
+    #[serde(skip)]
+    pub selected: Vec<String>,
 }
 
 fn human_size(bytes: u64) -> String {
@@ -376,6 +381,8 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         handoff_ms: prefs.handoff_seconds as u64 * 1000,
         quality: prefs.quality.clone(),
         pending_dialog: None,
+        ask: None,
+        selected: paths.to_vec(),
     })
 }
 

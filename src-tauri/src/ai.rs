@@ -18,7 +18,10 @@ use tauri::AppHandle;
 
 /// Starts watching for AI jobs, and points connected AI apps at this copy of Convertino.
 pub fn start(app: AppHandle) {
-    std::thread::spawn(connect::repair);
+    std::thread::spawn(|| {
+        connect::repair();
+        crate::ask::refresh();
+    });
     std::thread::spawn(move || watch(app));
 }
 
@@ -120,6 +123,7 @@ pub async fn ai_connect(id: String, on: bool) -> Result<AiStatus, String> {
         let app = connect::App::from_id(&id).ok_or("Unknown app")?;
         if on { connect::connect(app) } else { connect::disconnect(app) }?;
         log::info!("ai: {} {}", if on { "connected" } else { "disconnected" }, app.name());
+        crate::ask::refresh();
         Ok(status())
     })
     .await
