@@ -20,17 +20,38 @@ no shortcut to remember. The wheel opens at your pointer, on the file you clicke
 keyboard, the shortcut is there too; change it to anything you like in
 **Settings › General**.
 
-**Status:** milestones 1–4 and 6–8 of 10. Alt+right-click (and the optional shortcut) open the wheel;
-images, audio, video, PDFs, documents, data files and archives convert for real,
-with a progress ring at the pointer and Undo. "Edit" on the PDF wheel opens an editor:
-rearrange, rotate, delete and add pages, and mark up (text, highlight, draw, signature,
-pictures, form filling), saved as a copy. Settings (click the tray icon) holds the optional shortcut,
-the wheel's order, quality, and the converters, which download the first time they're needed.
-Shift+click a format on the wheel to set options for one conversion. On a Mac, Option-right-click opens the wheel; Settings walks you through the
-two permissions macOS needs. Open/Save dialogs come next.
+## What it converts
 
-- [Build plan](docs/BUILD-PLAN.md)
-- [Interactive wheel mockup](docs/wheel-mockup.html) (download and open in a browser)
+- **Pictures** (JPG, PNG, WebP, AVIF, HEIC, TIFF, GIF, BMP, SVG, …) to JPG, PNG, WebP, AVIF,
+  ICO or PDF; camera RAW has its own wheel (below).
+- **Audio** (MP3, WAV, FLAC, AAC, OGG, Opus, M4A, …) to MP3, WAV, FLAC, AAC, OGG, Opus or M4A, and Trim.
+- **Video** (MP4, MOV, MKV, WebM, AVI, …) to MP4, WebM, GIF, MP3, 720p or still frames.
+- **PDFs** to JPG, PNG, WebP or text; split, merge, and edit (below).
+- **Documents** (Word, PowerPoint, Excel, OpenDocument, RTF, Markdown, HTML) to PDF, DOCX,
+  ODT, HTML, Markdown or text. No Microsoft Office needed.
+- **Data** (CSV, TSV, JSON, YAML, XML) to Excel, CSV, JSON, YAML or TSV.
+- **Archives** (ZIP, 7z, RAR, TAR, …): extract, or pack into ZIP, 7z or TAR.GZ.
+- **Compress to a size:** pick a size (say 25 MB for an email) and Convertino makes the file fit.
+
+A progress ring shows at the pointer, and every conversion can be undone. Shift+click a
+format on the wheel to set options for that one conversion.
+
+## PDF editor
+
+**Edit** on the PDF wheel opens an editor that saves a copy (the original is never changed):
+
+- **Pages:** rearrange, rotate, delete, and add pages from another PDF.
+- **Mark up:** text, highlight, draw, signature, pictures, and filling in forms.
+- **Adjust:** straighten a photographed page by dragging its four corners onto the
+  page's corners (like Corner Pin in After Effects), or let **Find edges** do it; then
+  Enhance, Grayscale, Black & white or Invert, with brightness and contrast. Adjusted
+  pages are saved as pictures (200 dpi, or 300 dpi for print).
+
+## Settings
+
+Click the tray icon (menu bar on a Mac) for Settings: the optional shortcut, the wheel's
+order, quality, and the converters, which download the first time they're needed. On a
+Mac, Settings walks you through the two permissions macOS needs.
 
 ## Camera RAW photos
 

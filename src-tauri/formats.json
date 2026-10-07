@@ -55,7 +55,7 @@
           "label": "Edit",
           "icon": "edit",
           "action": true,
-          "hint": "Rearrange pages, mark up, sign"
+          "hint": "Rearrange, mark up, sign, straighten"
         },
         {
           "id": "pdf.merge",

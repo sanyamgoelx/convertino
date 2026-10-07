@@ -11,6 +11,7 @@
   <div class="tabs" role="tablist" aria-label="Edit mode">
     <button type="button" role="tab" id="tab-pages" aria-selected="true">Pages</button>
     <button type="button" role="tab" id="tab-markup" aria-selected="false">Mark up</button>
+    <button type="button" role="tab" id="tab-adjust" aria-selected="false">Adjust</button>
   </div>
   <div class="sep"></div>
 
@@ -35,6 +36,11 @@
     <div class="group" id="swatches" role="group" aria-label="Colour"></div>
   </div>
 
+  <div class="group" id="adjust-tools" hidden>
+    <button class="tb" type="button" data-act="edges" title="Find the page's edges in a photo and put the corners on them"><svg viewBox="0 0 24 24"><path d="M4 8V4h4 M16 4h4v4 M20 16v4h-4 M8 20H4v-4 M8 9l8-1 1 8-9 1z"/></svg><span class="lbl">Find edges</span></button>
+    <button class="tb" type="button" data-act="resetq" title="Put the corners back on the page's own corners"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7 M3 4v5h5"/></svg><span class="lbl">Reset corners</span></button>
+  </div>
+
   <div class="spacer"></div>
   <button class="tb" type="button" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5 M4 9h10a6 6 0 010 12h-3"/></svg></button>
   <button class="tb" type="button" data-act="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5 M20 9H10a6 6 0 000 12h3"/></svg></button>
@@ -53,6 +59,62 @@
         <div class="layer" id="fields" style="pointer-events: none"></div>
       </div>
     </div>
+  </section>
+
+  <section class="adjust-view" id="adjust-view" hidden>
+    <nav class="rail" id="adj-rail" aria-label="Pages"></nav>
+    <div class="adj-stage">
+      <div class="adj-bar">
+        <div class="tabs" role="tablist" aria-label="View">
+          <button type="button" role="tab" id="adj-v-corners" aria-selected="true">Corners</button>
+          <button type="button" role="tab" id="adj-v-result" aria-selected="false">Result</button>
+        </div>
+      </div>
+      <div class="adj-view" id="adj-view">
+        <div class="sheet adj-sheet" id="adj-sheet">
+          <canvas id="adj-canvas"></canvas>
+          <svg class="adj-ov" id="adj-ov" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div id="adj-pins"></div>
+          <div class="loupe" id="adj-loupe" hidden><canvas id="adj-loupe-canvas" width="124" height="124"></canvas></div>
+        </div>
+      </div>
+    </div>
+    <aside class="adj-panel" aria-label="Adjust settings">
+      <div class="sect">
+        <div class="switch-row"><h2 id="adj-persp-label">Perspective</h2><button type="button" class="switch" role="switch" id="adj-persp" aria-checked="true" aria-labelledby="adj-persp-label"></button></div>
+        <p class="hint" id="adj-persp-hint">Drag the four corners onto the page's corners, like Corner Pin in After Effects. Arrow keys nudge a selected corner, Shift for 10×.</p>
+        <label class="adj-field" for="adj-size">Page size
+          <select id="adj-size">
+            <option value="corners">Match the corners</option>
+            <option value="a4">A4 (210 × 297 mm)</option>
+            <option value="letter">Letter (8.5 × 11 in)</option>
+            <option value="original">Same as the original page</option>
+          </select>
+        </label>
+      </div>
+      <div class="sect">
+        <h2>Filter</h2>
+        <div class="filters" id="adj-filters"></div>
+        <label class="slider" for="adj-bright">Brightness <output id="adj-bright-out">0</output><input type="range" id="adj-bright" min="-50" max="50" value="0"></label>
+        <label class="slider" for="adj-contrast">Contrast <output id="adj-contrast-out">0</output><input type="range" id="adj-contrast" min="-50" max="50" value="0"></label>
+      </div>
+      <div class="sect">
+        <h2>Apply filter to</h2>
+        <div class="btn-row">
+          <button type="button" class="btn" id="adj-apply-sel">Selected pages</button>
+          <button type="button" class="btn" id="adj-apply-all">All pages</button>
+        </div>
+        <p class="hint">Corners stay per page. Ctrl+click pages on the left to pick several.</p>
+        <label class="adj-field" for="adj-dpi">Picture quality
+          <select id="adj-dpi">
+            <option value="200">200 dpi (smaller file)</option>
+            <option value="300">300 dpi (print quality)</option>
+          </select>
+        </label>
+        <p class="note">Pages you straighten or filter are saved as pictures, so their text can't be selected or searched any more. Other pages stay as they are.</p>
+        <button type="button" class="linkish" id="adj-clear">Undo all changes to this page</button>
+      </div>
+    </aside>
   </section>
 
   <div class="dialog" id="sig-dialog" role="dialog" aria-label="Your signature" hidden>

@@ -1,6 +1,7 @@
 // Convertino PDF editor.
 //   Pages:   reorder (drag), rotate, delete, save selected pages, add pages from another PDF.
 //   Mark up: text, highlight, draw, signature (typed or drawn), pictures, and filling in form fields.
+//   Adjust:  straighten a photographed page with four corners (like Corner Pin), and filters.
 // PDF.js draws the pages; pdf-lib writes a new copy. The original file is never changed:
 // Save writes "<name> (edited).pdf" next to it.
 //
@@ -8,9 +9,10 @@
 // rotation), so they stay put when pages move or turn, and pdf-lib can draw them as is.
 
 import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
+import { homography, mapPoint, warp, applyFilter, findEdges, convex, turnPoint, unturnPoint, IDENTITY, isIdentity, outputSize, FILTERS } from "./adjust-core.js";
 
 const tauri = window.__TAURI__;
-const { PDFDocument, rgb, degrees, BlendMode, LineCapStyle, PDFTextField, PDFCheckBox } = window.PDFLib;
+const { PDFDocument, PDFPage, rgb, degrees, BlendMode, LineCapStyle, PDFTextField, PDFCheckBox } = window.PDFLib;
 const fontkit = window.fontkit;
 
 const abs = (p) => new URL(p, location.href).href;
@@ -54,8 +56,9 @@ if (isMac) document.documentElement.dataset.os = "mac";
 // ---------- state ----------
 
 const srcs = []; // { name, bytes: Uint8Array (for pdf-lib), pdf: PDF.js document }
-let st = { pages: [], marks: {}, fields: {} }; // everything Undo covers
+let st = { pages: [], marks: {}, fields: {}, adjust: {} }; // everything Undo covers
 // pages: { key, src, index, rot }  rot = rotation added here (0/90/180/270)
+// adjust: key -> { on, q, size, filter, bright, contrast } (see the Adjust section)
 const ui = { mode: "pages", sel: new Set(), anchor: null, current: null, tool: "select", color: 1, picked: null, place: null, busy: false };
 const hist = [], fut = [];
 let dirty = false;
@@ -98,10 +101,17 @@ function afterHistory() {
 // ---------- PDF.js pages ----------
 
 const pageCache = new Map(); // "src:index" -> PDFPageProxy
-async function pdfPage(item) {
+/** The page as it is in the PDF. */
+async function realPage(item) {
   const k = `${item.src}:${item.index}`;
   if (!pageCache.has(k)) pageCache.set(k, srcs[item.src].pdf.getPage(item.index + 1));
   return pageCache.get(k);
+}
+/** The page as it will be saved: adjusted pages come back as their straightened, filtered picture. */
+async function pdfPage(item) {
+  const real = await realPage(item);
+  const a = activeAdjust(item.key);
+  return a ? adjustedPage(item, real, a) : real;
 }
 const itemOf = (key) => st.pages.find((p) => p.key === key);
 const totalRot = (page, item) => (((page.rotate + item.rot) % 360) + 360) % 360;
@@ -135,7 +145,7 @@ const thumbs = new IntersectionObserver((entries) => {
     const c = e.target;
     const item = itemOf(c.dataset.key);
     if (!item) continue;
-    const want = `${item.rot}`;
+    const want = thumbSig(item);
     if (c.dataset.drawn !== want) {
       c.dataset.drawn = want;
       drawThumb(item, c, Number(c.dataset.box));
@@ -149,9 +159,10 @@ function thumbCanvas(item, box) {
   thumbs.observe(c);
   return c;
 }
+const thumbSig = (item) => `${item.rot}|${adjustSig(item.key)}`;
 function redrawThumb(c, item) {
-  if (c.dataset.drawn === `${item.rot}`) return;
-  c.dataset.drawn = `${item.rot}`;
+  if (c.dataset.drawn === thumbSig(item)) return;
+  c.dataset.drawn = thumbSig(item);
   drawThumb(item, c, Number(c.dataset.box));
 }
 
@@ -419,9 +430,10 @@ async function renderStage() {
   const fit = Math.min((stage.clientWidth - 48) / one.width, (stage.clientHeight - 48) / one.height);
   const scale = Math.max(0.3, Math.min(fit, 3));
   const view = page.getViewport({ scale, rotation });
-  const changed = !vp || !stageItem || stageItem.key !== item.key || stageItem.rot !== item.rot || Math.abs(vp.scale - scale) > 0.001;
+  const sig = adjustSig(item.key);
+  const changed = !vp || !stageItem || stageItem.key !== item.key || stageItem.rot !== item.rot || stageItem.sig !== sig || Math.abs(vp.scale - scale) > 0.001;
   vp = view;
-  stageItem = { key: item.key, rot: item.rot, total: rotation };
+  stageItem = { key: item.key, rot: item.rot, total: rotation, sig };
   const sheet = $("#sheet");
   sheet.style.width = `${Math.floor(vp.width)}px`;
   sheet.style.height = `${Math.floor(vp.height)}px`;
@@ -982,7 +994,16 @@ async function buildPdf() {
   const added = {};
   const final = [];
   for (const it of st.pages) {
-    if (it.src === 0) {
+    const adj = activeAdjust(it.key);
+    if (adj) {
+      // Straightened or filtered: a new page holding the picture.
+      const { bytes: pic, png, size } = await adjustedForSave(it, adj);
+      const img = png ? await out.embedPng(pic) : await out.embedJpg(pic);
+      const pg = PDFPage.create(out);
+      pg.setSize(size[0], size[1]);
+      pg.drawImage(img, { x: 0, y: 0, width: size[0], height: size[1] });
+      final.push(pg);
+    } else if (it.src === 0) {
       final.push(originals[it.index]);
     } else {
       added[it.src] ||= await PDFDocument.load(srcs[it.src].bytes, { ignoreEncryption: false });
@@ -1077,6 +1098,583 @@ async function deliver(bytes, suffix) {
   return name;
 }
 
+// ---------- adjust: straighten (Corner Pin) and filter pages ----------
+//
+// Each page can have { on, q, size, filter, bright, contrast } in st.adjust. q holds the
+// four corners as fractions of the page as it is in the PDF (before turns added here),
+// top-left, top-right, bottom-right, bottom-left. An adjusted page is drawn from a picture:
+// PDF.js renders the page, warp() straightens it, applyFilter() runs the filter, and the
+// saved PDF gets that picture (200 or 300 dpi) in place of the page.
+
+const PREVIEW_DPI = 130;
+const SOURCE_MAX = 4200; // longest side of a page picture, in pixels
+const adj = { view: "corners", drag: -1, focus: -1, recorded: false, nudgeAt: 0, want: "", rendering: "", chipsSig: "", chipsToken: 0, sliding: false, frame: 0 };
+let saveDpi = 200;
+try {
+  const v = Number(localStorage.getItem("convertino.adjust.dpi"));
+  if (v === 200 || v === 300) saveDpi = v;
+} catch {}
+
+const freshAdjust = () => ({ on: true, q: IDENTITY.map((p) => p.slice()), size: "corners", filter: "original", bright: 0, contrast: 0 });
+function adjustOf(key) { return (st.adjust && st.adjust[key]) || freshAdjust(); }
+function editAdjust(key) {
+  st.adjust ||= {};
+  return st.adjust[key] || (st.adjust[key] = freshAdjust());
+}
+function isAdjusted(a) {
+  if (!a) return false;
+  if (a.filter !== "original" || a.bright || a.contrast) return true;
+  return !!a.on && (!isIdentity(a.q) || a.size === "a4" || a.size === "letter");
+}
+function activeAdjust(key) {
+  const a = st.adjust && st.adjust[key];
+  return isAdjusted(a) ? a : null;
+}
+function adjustSig(key) {
+  const a = activeAdjust(key);
+  return a ? JSON.stringify(a) : "";
+}
+const geomOf = (a) => ({ on: a.on, q: a.on ? a.q : null, size: a.on ? a.size : null });
+function trim(map, max) { while (map.size > max) map.delete(map.keys().next().value); }
+
+/** The page (as in the PDF, its own turn applied) as pixels at `scale`. */
+const sourceCache = new Map();
+function pageSource(item, real, scale) {
+  const k = `${item.src}:${item.index}:${scale.toFixed(4)}`;
+  if (!sourceCache.has(k)) {
+    const job = (async () => {
+      const v = real.getViewport({ scale });
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(v.width));
+      c.height = Math.max(1, Math.round(v.height));
+      await real.render({ canvas: c, viewport: v, background: "#ffffff" }).promise;
+      const data = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+      return { w: c.width, h: c.height, data };
+    })();
+    job.catch(() => sourceCache.delete(k));
+    sourceCache.set(k, job);
+    trim(sourceCache, 3);
+  }
+  return sourceCache.get(k);
+}
+
+/** Straightened (not yet filtered) pixels for a page, cached by its corners. */
+const warpCache = new Map();
+function warped(item, real, a, dpi) {
+  const one = real.getViewport({ scale: 1 });
+  const base = [one.width, one.height];
+  const size = outputSize(a, base);
+  const k = `${item.src}:${item.index}|${JSON.stringify(geomOf(a))}|${dpi}`;
+  if (!warpCache.has(k)) {
+    const job = (async () => {
+      const ow = Math.max(1, Math.round((size[0] * dpi) / 72)), oh = Math.max(1, Math.round((size[1] * dpi) / 72));
+      let scale = dpi / 72;
+      if (a.on) {
+        // Enough source pixels for the part inside the corners.
+        const q = a.q.map(([u, v]) => [u * base[0], v * base[1]]);
+        const len = (p, r) => Math.hypot(p[0] - r[0], p[1] - r[1]);
+        const cw = Math.max(1, (len(q[0], q[1]) + len(q[3], q[2])) / 2), ch = Math.max(1, (len(q[0], q[3]) + len(q[1], q[2])) / 2);
+        scale *= Math.max(size[0] / cw, size[1] / ch);
+      }
+      scale = Math.min(scale, SOURCE_MAX / Math.max(base[0], base[1]));
+      scale = Math.max(0.05, Math.round(scale * 1000) / 1000);
+      const src = await pageSource(item, real, scale);
+      const quad = (a.on ? a.q : IDENTITY).map(([u, v]) => [u * src.w, v * src.h]);
+      const H = homography([[0, 0], [ow, 0], [ow, oh], [0, oh]], quad);
+      const out = new Uint8ClampedArray(ow * oh * 4);
+      warp(src.data, src.w, src.h, H, out, ow, oh);
+      return { w: ow, h: oh, data: out, size };
+    })();
+    job.catch(() => warpCache.delete(k));
+    warpCache.set(k, job);
+    trim(warpCache, 4);
+  }
+  return warpCache.get(k);
+}
+
+/** The finished picture of an adjusted page: { canvas, size (points) }. */
+async function makeRaster(item, real, a, dpi) {
+  const wp = await warped(item, real, a, dpi);
+  const img = new ImageData(new Uint8ClampedArray(wp.data), wp.w, wp.h);
+  if (a.filter !== "original" || a.bright || a.contrast) applyFilter(img.data, wp.w, wp.h, a.filter, a.bright, a.contrast, dpi);
+  const c = document.createElement("canvas");
+  c.width = wp.w;
+  c.height = wp.h;
+  c.getContext("2d").putImageData(img, 0, 0);
+  return { canvas: c, size: wp.size };
+}
+const rasterCache = new Map();
+function previewRaster(item, real, a) {
+  const k = `${item.src}:${item.index}|${JSON.stringify(a)}`;
+  if (!rasterCache.has(k)) {
+    const job = makeRaster(item, real, a, PREVIEW_DPI);
+    job.catch(() => rasterCache.delete(k));
+    rasterCache.set(k, job);
+    trim(rasterCache, 8);
+  }
+  return rasterCache.get(k);
+}
+
+/** What PDF.js's PageViewport does, for a page W × H points (origin bottom-left). */
+function makeViewport(W, H, scale, rotation) {
+  rotation = ((rotation % 360) + 360) % 360;
+  const [A, B, C, D] = { 0: [1, 0, 0, -1], 90: [0, 1, 1, 0], 180: [-1, 0, 0, 1], 270: [0, -1, -1, 0] }[rotation];
+  const cx = W / 2, cy = H / 2;
+  const turned = A === 0;
+  const ox = (turned ? cy : cx) * scale, oy = (turned ? cx : cy) * scale;
+  const t = [A * scale, B * scale, C * scale, D * scale, ox - A * scale * cx - C * scale * cy, oy - B * scale * cx - D * scale * cy];
+  const det = t[0] * t[3] - t[1] * t[2];
+  const inv = [t[3] / det, -t[1] / det, -t[2] / det, t[0] / det, (t[2] * t[5] - t[3] * t[4]) / det, (t[1] * t[4] - t[0] * t[5]) / det];
+  return {
+    width: (turned ? H : W) * scale,
+    height: (turned ? W : H) * scale,
+    scale, rotation, transform: t, viewBox: [0, 0, W, H],
+    convertToViewportPoint: (x, y) => [x * t[0] + y * t[2] + t[4], x * t[1] + y * t[3] + t[5]],
+    convertToPdfPoint: (x, y) => [x * inv[0] + y * inv[2] + inv[4], x * inv[1] + y * inv[3] + inv[5]],
+  };
+}
+
+/** Stands in for a PDF.js page: the adjusted picture, W × H points, no turn of its own. */
+function adjustedPage(item, real, a) {
+  const one = real.getViewport({ scale: 1 });
+  const [W, H] = outputSize(a, [one.width, one.height]);
+  return {
+    rotate: 0,
+    adjusted: true,
+    getViewport: ({ scale = 1, rotation = 0 } = {}) => makeViewport(W, H, scale, rotation),
+    getAnnotations: async () => [],
+    render({ canvas, viewport }) {
+      let cancelled = false;
+      const promise = (async () => {
+        const r = await previewRaster(item, real, a);
+        if (cancelled) return;
+        const g = canvas.getContext("2d");
+        g.save();
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.fillStyle = "#ffffff";
+        g.fillRect(0, 0, canvas.width, canvas.height);
+        const t = viewport.transform;
+        g.setTransform(t[0], t[1], t[2], t[3], t[4], t[5]);
+        g.transform(1, 0, 0, -1, 0, H); // pictures go top-down, PDF space goes bottom-up
+        g.imageSmoothingQuality = "high";
+        g.drawImage(r.canvas, 0, 0, W, H);
+        g.restore();
+      })();
+      return { promise, cancel() { cancelled = true; } };
+    },
+  };
+}
+
+/** The picture that goes into the saved PDF for an adjusted page. */
+async function adjustedForSave(item, a) {
+  const real = await realPage(item);
+  const r = await makeRaster(item, real, a, saveDpi);
+  const png = a.filter === "bw"; // sharp edges: PNG keeps them clean and small
+  const blob = await new Promise((res) => r.canvas.toBlob(res, png ? "image/png" : "image/jpeg", 0.9));
+  if (!blob) throw new Error("Couldn't make the picture for an adjusted page.");
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), png, size: r.size };
+}
+
+// ----- the Adjust view -----
+
+function renderAdjust() {
+  const item = itemOf(ui.current) || st.pages[0];
+  if (!item) return;
+  ui.current = item.key;
+  renderAdjRail();
+  renderAdjStage();
+  renderAdjPanel();
+}
+
+const adjRailCanvases = new Map();
+function renderAdjRail() {
+  const rail = $("#adj-rail");
+  rail.textContent = "";
+  st.pages.forEach((item, i) => {
+    const b = el("button", "", { type: "button", "aria-label": `Page ${i + 1}` });
+    if (item.key === ui.current) b.setAttribute("aria-current", "page");
+    if (ui.sel.size > 1 && ui.sel.has(item.key)) b.classList.add("sel");
+    let c = adjRailCanvases.get(item.key);
+    if (!c) {
+      c = thumbCanvas(item, 104);
+      adjRailCanvases.set(item.key, c);
+    }
+    redrawThumb(c, item);
+    const num = el("span", "num");
+    num.textContent = i + 1;
+    b.append(c, num);
+    if (activeAdjust(item.key)) b.append(el("span", "dot", { title: "Adjusted" }));
+    b.addEventListener("click", (e) => {
+      const keys = st.pages.map((p) => p.key);
+      if (e.ctrlKey || e.metaKey) {
+        if (!ui.sel.has(ui.current)) ui.sel.add(ui.current);
+        if (ui.sel.has(item.key) && item.key !== ui.current) ui.sel.delete(item.key);
+        else ui.sel.add(item.key);
+        ui.anchor = item.key;
+      } else if (e.shiftKey && ui.anchor && keys.includes(ui.anchor)) {
+        const x = keys.indexOf(ui.anchor), y = keys.indexOf(item.key);
+        ui.sel = new Set(keys.slice(Math.min(x, y), Math.max(x, y) + 1));
+      } else {
+        ui.sel = new Set([item.key]);
+        ui.anchor = item.key;
+      }
+      ui.current = item.key;
+      adj.focus = -1;
+      refresh();
+    });
+    rail.append(b);
+  });
+  const cur = rail.querySelector('[aria-current="page"]');
+  if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+}
+
+async function renderAdjStage() {
+  const item = itemOf(ui.current);
+  if (!item) return;
+  const result = adj.view === "result";
+  $("#adj-v-corners").setAttribute("aria-selected", !result);
+  $("#adj-v-result").setAttribute("aria-selected", result);
+  const page = result ? await pdfPage(item) : await realPage(item);
+  if (itemOf(ui.current) !== item || (adj.view === "result") !== result) return;
+  const rotation = totalRot(page, item);
+  const view = $("#adj-view"), sheet = $("#adj-sheet"), canvas = $("#adj-canvas");
+  const one = page.getViewport({ scale: 1, rotation });
+  const fit = Math.min((view.clientWidth - 48) / one.width, (view.clientHeight - 40) / one.height);
+  const scale = Math.max(0.1, Math.min(fit, 4));
+  const dpr = window.devicePixelRatio || 1;
+  const hi = page.getViewport({ scale: scale * dpr, rotation });
+  sheet.style.width = `${Math.floor(hi.width / dpr)}px`;
+  sheet.style.height = `${Math.floor(hi.height / dpr)}px`;
+  drawPins();
+  const want = `${item.key}|${item.src}:${item.index}|${rotation}|${result ? adjustSig(item.key) || "plain" : "page"}|${Math.round(hi.width)}x${Math.round(hi.height)}`;
+  adj.want = want;
+  if (canvas.dataset.drawn === want || adj.rendering === want) return;
+  adj.rendering = want;
+  // Draw off screen, then swap, so the old picture stays until the new one is ready.
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.floor(hi.width));
+  c.height = Math.max(1, Math.floor(hi.height));
+  sheet.classList.add("busy");
+  try {
+    await page.render({ canvas: c, viewport: hi, background: "#ffffff" }).promise;
+  } catch (e) {
+    if (e && e.name !== "RenderingCancelledException") { console.warn(e); toast(e.message || String(e), true); }
+  } finally {
+    if (adj.rendering === want) adj.rendering = "";
+  }
+  if (adj.want !== want) return;
+  sheet.classList.remove("busy");
+  canvas.width = c.width;
+  canvas.height = c.height;
+  canvas.getContext("2d").drawImage(c, 0, 0);
+  canvas.dataset.drawn = want;
+}
+
+/** Corners as shown: the stored corners turned like the page on screen. */
+function shownCorners(item) {
+  return adjustOf(item.key).q.map((p) => turnPoint(p, item.rot));
+}
+function drawPins() {
+  const item = itemOf(ui.current);
+  const ov = $("#adj-ov"), pins = $("#adj-pins");
+  pins.textContent = "";
+  ov.textContent = "";
+  if (!item || adj.view !== "corners" || !adjustOf(item.key).on) return;
+  const sheet = $("#adj-sheet");
+  const W = sheet.clientWidth || 1, Hh = sheet.clientHeight || 1;
+  ov.setAttribute("viewBox", `0 0 ${W} ${Hh}`);
+  const q = shownCorners(item).map(([u, v]) => [u * W, v * Hh]);
+  // A 3 × 3 grid inside the corners shows how straight the result will be.
+  let grid = "";
+  try {
+    const Hm = homography([[0, 0], [1, 0], [1, 1], [0, 1]], q);
+    for (const t of [1 / 3, 2 / 3]) {
+      const a = mapPoint(Hm, t, 0), b = mapPoint(Hm, t, 1), c = mapPoint(Hm, 0, t), d = mapPoint(Hm, 1, t);
+      grid += `M${a}L${b}M${c}L${d}`;
+    }
+  } catch {}
+  const NS = "http://www.w3.org/2000/svg";
+  const path = (cls, d) => { const p = document.createElementNS(NS, "path"); p.setAttribute("class", cls); p.setAttribute("d", d); ov.append(p); };
+  path("quad-shade", `M0,0H${W}V${Hh}H0Z M${q.map((c) => c.join(",")).join("L")}Z`);
+  if (grid) path("quad-grid", grid);
+  path("quad-line", `M${q.map((c) => c.join(",")).join("L")}Z`);
+  const names = ["Top left", "Top right", "Bottom right", "Bottom left"];
+  q.forEach(([x, y], i) => {
+    const b = el("button", "pin" + (i === adj.drag || i === adj.focus ? " active" : ""), { type: "button", "aria-label": `${names[i]} corner`, title: `${names[i]} corner` });
+    b.dataset.i = i;
+    b.style.left = `${x}px`;
+    b.style.top = `${y}px`;
+    pins.append(b);
+  });
+}
+
+function showLoupe(u, v) {
+  const canvas = $("#adj-canvas"), sheet = $("#adj-sheet"), loupe = $("#adj-loupe");
+  const g = $("#adj-loupe-canvas").getContext("2d");
+  const W = sheet.clientWidth, H = sheet.clientHeight;
+  const Z = 3, side = (124 / Z) * (canvas.width / W);
+  g.imageSmoothingEnabled = false;
+  g.fillStyle = "#000";
+  g.fillRect(0, 0, 124, 124);
+  g.drawImage(canvas, u * canvas.width - side / 2, v * canvas.height - side / 2, side, side, 0, 0, 124, 124);
+  g.strokeStyle = "#ffb020";
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(62, 46); g.lineTo(62, 78); g.moveTo(46, 62); g.lineTo(78, 62);
+  g.stroke();
+  const x = u * W, y = v * H;
+  let lx = x + 28, ly = y - 152;
+  if (ly < -16) ly = y + 28;
+  if (lx + 124 > W + 16) lx = x - 152;
+  loupe.style.left = `${lx}px`;
+  loupe.style.top = `${ly}px`;
+  loupe.hidden = false;
+}
+
+/** Moves corner i to a point on the page as shown (fractions); refuses shapes that fold over. */
+function moveCorner(i, u, v) {
+  const item = itemOf(ui.current);
+  u = Math.max(0, Math.min(1, u));
+  v = Math.max(0, Math.min(1, v));
+  const q = adjustOf(item.key).q.map((p) => p.slice());
+  q[i] = unturnPoint([u, v], item.rot);
+  if (!convex(q)) return false;
+  editAdjust(item.key).q = q;
+  return true;
+}
+
+function renderAdjPanel() {
+  const item = itemOf(ui.current);
+  if (!item) return;
+  const a = adjustOf(item.key);
+  $("#adj-persp").setAttribute("aria-checked", a.on ? "true" : "false");
+  $("#adj-size").value = a.size;
+  $("#adj-size").disabled = !a.on;
+  $("#adj-persp-hint").hidden = !a.on;
+  if (!adj.sliding) {
+    $("#adj-bright").value = a.bright;
+    $("#adj-contrast").value = a.contrast;
+  }
+  $("#adj-bright-out").textContent = a.bright;
+  $("#adj-contrast-out").textContent = a.contrast;
+  $("#adj-dpi").value = String(saveDpi);
+  $("#adj-apply-sel").disabled = ui.sel.size < 2;
+  $("#adj-apply-sel").title = ui.sel.size < 2 ? "Ctrl+click pages on the left to pick several" : `Copy this filter to the ${ui.sel.size} selected pages`;
+  $("#adj-clear").hidden = !(st.adjust && st.adjust[item.key]);
+  $$("#adj-filters .filter").forEach((b) => b.setAttribute("aria-pressed", b.dataset.f === a.filter ? "true" : "false"));
+  renderChips(item, a);
+}
+
+/** Filter buttons with a small picture of the page in each filter. */
+async function renderChips(item, a) {
+  const box = $("#adj-filters");
+  if (!box.children.length) {
+    for (const [id, name] of FILTERS) {
+      const b = el("button", "filter", { type: "button", "aria-pressed": "false" });
+      b.dataset.f = id;
+      const c = el("canvas", "", { width: "60", height: "80" });
+      const label = el("span");
+      label.textContent = name;
+      b.append(c, label);
+      b.addEventListener("click", () => setFilter(id));
+      box.append(b);
+    }
+  }
+  $$("#adj-filters .filter").forEach((b) => b.setAttribute("aria-pressed", b.dataset.f === a.filter ? "true" : "false"));
+  const sig = `${item.src}:${item.index}|${item.rot}|${JSON.stringify(geomOf(a))}`;
+  if (sig === adj.chipsSig) return;
+  adj.chipsSig = sig;
+  const token = ++adj.chipsToken;
+  try {
+    const real = await realPage(item);
+    const small = { ...a, filter: "original", bright: 0, contrast: 0 };
+    const wp = await warped(item, real, small, 24);
+    if (token !== adj.chipsToken) return;
+    for (const b of $$("#adj-filters .filter")) {
+      const img = new ImageData(new Uint8ClampedArray(wp.data), wp.w, wp.h);
+      applyFilter(img.data, wp.w, wp.h, b.dataset.f, 0, 0, 24);
+      const tmp = el("canvas");
+      tmp.width = wp.w;
+      tmp.height = wp.h;
+      tmp.getContext("2d").putImageData(img, 0, 0);
+      const c = b.querySelector("canvas");
+      const turned = item.rot % 180 !== 0;
+      c.width = turned ? wp.h : wp.w;
+      c.height = turned ? wp.w : wp.h;
+      const g = c.getContext("2d");
+      g.translate(c.width / 2, c.height / 2);
+      g.rotate((item.rot * Math.PI) / 180);
+      g.drawImage(tmp, -wp.w / 2, -wp.h / 2);
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+function adjustChanged() {
+  refresh();
+}
+function setFilter(id) {
+  const a = adjustOf(ui.current);
+  if (a.filter === id) return;
+  record();
+  editAdjust(ui.current).filter = id;
+  adj.view = "result";
+  adjustChanged();
+}
+async function findEdgesHere() {
+  const item = itemOf(ui.current);
+  if (!item) return;
+  try {
+    const real = await realPage(item);
+    const one = real.getViewport({ scale: 1 });
+    const scale = Math.round((560 / Math.max(one.width, one.height)) * 1000) / 1000;
+    const src = await pageSource(item, real, scale);
+    const q = findEdges(src.data, src.w, src.h);
+    if (!q) return toast("Couldn't find the edges of a page in this picture. Drag the corners onto them instead.", true);
+    record();
+    const e = editAdjust(item.key);
+    e.q = q;
+    e.on = true;
+    adj.view = "corners";
+    adjustChanged();
+    toast("Corners placed on the page's edges. Check them, then look at Result.");
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+}
+function resetCorners() {
+  const item = itemOf(ui.current);
+  if (!item || isIdentity(adjustOf(item.key).q)) return;
+  record();
+  editAdjust(item.key).q = IDENTITY.map((p) => p.slice());
+  adj.view = "corners";
+  adjustChanged();
+}
+function copyFilterTo(keys) {
+  const a = adjustOf(ui.current);
+  const others = keys.filter((k) => k !== ui.current);
+  if (!others.length) return;
+  record();
+  for (const k of others) {
+    const e = editAdjust(k);
+    e.filter = a.filter;
+    e.bright = a.bright;
+    e.contrast = a.contrast;
+  }
+  adjustChanged();
+  const name = FILTERS.find((f) => f[0] === a.filter)[1];
+  toast(`${name} copied to ${others.length} more page${others.length > 1 ? "s" : ""}`);
+}
+
+function wireAdjust() {
+  $("#adj-v-corners").addEventListener("click", () => { adj.view = "corners"; renderAdjStage(); updateStatus(); });
+  $("#adj-v-result").addEventListener("click", () => { adj.view = "result"; renderAdjStage(); updateStatus(); });
+  $("#adj-persp").addEventListener("click", () => {
+    record();
+    const e = editAdjust(ui.current);
+    e.on = !e.on;
+    adjustChanged();
+  });
+  $("#adj-size").addEventListener("change", (ev) => {
+    record();
+    editAdjust(ui.current).size = ev.target.value;
+    adj.view = "result";
+    adjustChanged();
+  });
+  for (const id of ["bright", "contrast"]) {
+    const input = $(`#adj-${id}`);
+    input.addEventListener("input", () => {
+      if (!adj.sliding) { record(); adj.sliding = true; }
+      editAdjust(ui.current)[id] = Number(input.value);
+      $(`#adj-${id}-out`).textContent = input.value;
+      adj.view = "result";
+      cancelAnimationFrame(adj.frame);
+      adj.frame = requestAnimationFrame(() => { renderAdjStage(); updateStatus(); });
+    });
+    input.addEventListener("change", () => { adj.sliding = false; adjustChanged(); });
+  }
+  $("#adj-dpi").addEventListener("change", (ev) => {
+    saveDpi = Number(ev.target.value) === 300 ? 300 : 200;
+    try { localStorage.setItem("convertino.adjust.dpi", String(saveDpi)); } catch {}
+  });
+  $("#adj-apply-sel").addEventListener("click", () => copyFilterTo([...ui.sel]));
+  $("#adj-apply-all").addEventListener("click", () => copyFilterTo(st.pages.map((p) => p.key)));
+  $("#adj-clear").addEventListener("click", () => {
+    if (!st.adjust || !st.adjust[ui.current]) return;
+    record();
+    delete st.adjust[ui.current];
+    adj.view = "corners";
+    adjustChanged();
+  });
+
+  // Dragging a corner, with a magnifier.
+  const pins = $("#adj-pins");
+  const pointAt = (e) => {
+    const r = $("#adj-sheet").getBoundingClientRect();
+    return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
+  };
+  pins.addEventListener("pointerdown", (e) => {
+    const b = e.target.closest(".pin");
+    if (!b || e.button !== 0) return;
+    e.preventDefault();
+    adj.drag = adj.focus = Number(b.dataset.i);
+    adj.recorded = false;
+    pins.setPointerCapture(e.pointerId);
+    const [u, v] = shownCorners(itemOf(ui.current))[adj.drag];
+    drawPins();
+    showLoupe(u, v);
+  });
+  pins.addEventListener("pointermove", (e) => {
+    if (adj.drag < 0) return;
+    const [u, v] = pointAt(e);
+    const before = snapshot();
+    if (moveCorner(adj.drag, u, v)) {
+      if (!adj.recorded) { hist.push(before); if (hist.length > 60) hist.shift(); fut.length = 0; setDirty(true); adj.recorded = true; }
+      drawPins();
+    }
+    const [su, sv] = shownCorners(itemOf(ui.current))[adj.drag];
+    showLoupe(su, sv);
+  });
+  const end = () => {
+    if (adj.drag < 0) return;
+    const i = adj.drag;
+    adj.drag = -1;
+    $("#adj-loupe").hidden = true;
+    if (adj.recorded) adjustChanged();
+    else drawPins();
+    const b = $(`#adj-pins .pin[data-i="${i}"]`);
+    if (b) b.focus({ preventScroll: true });
+  };
+  pins.addEventListener("pointerup", end);
+  pins.addEventListener("pointercancel", end);
+  pins.addEventListener("focusin", (e) => {
+    const b = e.target.closest(".pin");
+    if (b) adj.focus = Number(b.dataset.i);
+  });
+  pins.addEventListener("keydown", (e) => {
+    const b = e.target.closest(".pin");
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!b || !d) return;
+    e.preventDefault();
+    const i = Number(b.dataset.i);
+    const sheet = $("#adj-sheet"), step = e.shiftKey ? 10 : 1;
+    const [u, v] = shownCorners(itemOf(ui.current))[i];
+    const before = snapshot();
+    if (moveCorner(i, u + (d[0] * step) / sheet.clientWidth, v + (d[1] * step) / sheet.clientHeight)) {
+      // One Undo step per burst of nudges.
+      if (Date.now() - adj.nudgeAt > 800) { hist.push(before); if (hist.length > 60) hist.shift(); fut.length = 0; setDirty(true); }
+      adj.nudgeAt = Date.now();
+      adj.focus = i;
+      drawPins();
+      updateStatus();
+      clearTimeout(adj.nudgeTimer);
+      adj.nudgeTimer = setTimeout(() => { renderAdjRail(); renderAdjPanel(); }, 500);
+      $(`#adj-pins .pin[data-i="${i}"]`).focus({ preventScroll: true });
+    }
+  });
+}
+
 // ---------- chrome: tabs, tools, status, toast, keys ----------
 
 function setMode(mode) {
@@ -1084,11 +1682,15 @@ function setMode(mode) {
   ui.mode = mode;
   if (mode === "markup" && ui.sel.size && !ui.sel.has(ui.current)) ui.current = [...ui.sel][0];
   $("#tab-pages").setAttribute("aria-selected", mode === "pages");
+  if (mode === "adjust" && ui.sel.size && !ui.sel.has(ui.current)) ui.current = [...ui.sel][0];
   $("#tab-markup").setAttribute("aria-selected", mode === "markup");
+  $("#tab-adjust").setAttribute("aria-selected", mode === "adjust");
   $("#pages-tools").hidden = mode !== "pages";
   $("#markup-tools").hidden = mode !== "markup";
+  $("#adjust-tools").hidden = mode !== "adjust";
   $("#pages-view").hidden = mode !== "pages";
   $("#markup-view").hidden = mode !== "markup";
+  $("#adjust-view").hidden = mode !== "adjust";
   $("#sig-dialog").hidden = true;
   vp = null;
   refresh();
@@ -1125,6 +1727,13 @@ function updateStatus() {
   if (ui.mode === "pages") {
     left.textContent = `${n} page${n === 1 ? "" : "s"}${ui.sel.size ? ` · ${ui.sel.size} selected` : ""}`;
     right.textContent = `Drag pages (or ${isMac ? "⌥←/→" : "Alt+←/→"}) to reorder · Ctrl+click or Shift+click to pick several · double-click to mark up`;
+  } else if (ui.mode === "adjust") {
+    const i = st.pages.findIndex((p) => p.key === ui.current) + 1;
+    const a = adjustOf(ui.current);
+    left.textContent = `Page ${i} of ${n}${ui.sel.size > 1 ? ` · ${ui.sel.size} selected` : ""}${activeAdjust(ui.current) ? " · adjusted" : ""}`;
+    right.textContent = adj.view === "result"
+      ? "This is how the page will be saved"
+      : a.on ? `Drag the corners onto the page's corners · arrow keys nudge a corner (Shift ×10)` : "Perspective is off for this page";
   } else {
     const i = st.pages.findIndex((p) => p.key === ui.current) + 1;
     left.textContent = `Page ${i} of ${n}${ui.fieldCount ? " · the blue boxes are form fields you can fill in" : ""}`;
@@ -1147,6 +1756,7 @@ function updateStatus() {
 
 function refresh() {
   if (ui.mode === "pages") renderGrid();
+  else if (ui.mode === "adjust") renderAdjust();
   else {
     renderRail();
     renderStage();
@@ -1168,6 +1778,7 @@ function toast(text, bad) {
 function wireChrome() {
   $("#tab-pages").addEventListener("click", () => setMode("pages"));
   $("#tab-markup").addEventListener("click", () => setMode("markup"));
+  $("#tab-adjust").addEventListener("click", () => setMode("adjust"));
   $$("[data-tool]").forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool)));
   const acts = {
     rotl: () => rotateSelected(-90),
@@ -1178,6 +1789,8 @@ function wireChrome() {
     selall: () => { ui.sel = ui.sel.size === st.pages.length ? new Set() : new Set(st.pages.map((p) => p.key)); refresh(); },
     undo, redo,
     save: () => save(false),
+    edges: findEdgesHere,
+    resetq: resetCorners,
   };
   $$("[data-act]").forEach((b) => b.addEventListener("click", () => acts[b.dataset.act]()));
   $("#add-file").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) addFromFile(f); });
@@ -1201,6 +1814,11 @@ function wireChrome() {
       if (e.key === "Escape") { ui.sel.clear(); return refresh(); }
       // Alt+←/→ (Option on Mac) moves the selected pages one place.
       if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); return nudgeSelected(e.key === "ArrowLeft" ? -1 : 1); }
+    } else if (ui.mode === "adjust") {
+      if (e.key === "PageDown" || e.key === "PageUp") {
+        const i = st.pages.findIndex((p) => p.key === ui.current) + (e.key === "PageDown" ? 1 : -1);
+        if (st.pages[i]) { ui.current = st.pages[i].key; ui.sel = new Set([ui.current]); refresh(); }
+      }
     } else {
       if ((e.key === "Delete" || e.key === "Backspace") && ui.picked) { e.preventDefault(); return removePicked(); }
       if (e.key === "Escape") { $("#sig-dialog").hidden = true; return setTool("select"); }
@@ -1213,6 +1831,7 @@ function wireChrome() {
     }
   });
   new ResizeObserver(() => { if (ui.mode === "markup") { vp = null; renderStage(); } }).observe($("#stage"));
+  new ResizeObserver(() => { if (ui.mode === "adjust") renderAdjStage(); }).observe($("#adj-view"));
 }
 
 // ---------- start ----------
@@ -1222,6 +1841,7 @@ async function main() {
   wireGrid();
   wireSheet();
   wireSignature();
+  wireAdjust();
   renderSwatches();
   setTool("select");
   measureFonts().then(() => ui.mode === "markup" && renderMarks());

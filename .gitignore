@@ -12,3 +12,8 @@ checks.done
 mac-check.cmd
 scripts/mac-check.ps1
 src-tauri/installer/dmg-background.tiff
+# Working notes and mockups (kept locally, not published)
+docs/STATUS.md
+docs/BUILD-PLAN.md
+docs/PLAN-RAW-CLI-MCP.md
+docs/*mockup*.html
