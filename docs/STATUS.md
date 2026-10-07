@@ -1,6 +1,6 @@
 # Convertino — status
 
-Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/convertino-status.md).
+Last updated: 7 Oct 2026. Shared with the Claude Project "Convertino" (claude/convertino-status.md).
 
 ## Where things are
 
@@ -36,6 +36,7 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - Licence: GPL-3.0-or-later. Zero cost: free tools and services only.
 - Formats live in `src-tauri/formats.json`; conversions in `src-tauri/src/convert.rs` (plus `video.rs`, `data.rs`, `archive.rs`).
 - PDF editor: `ui/editor.*` (PDF.js renders, pdf-lib saves a copy `<name> (edited).pdf`); Rust side `open_editor` / `editor_*` commands in lib.rs.
+- PDF editor "Nothing to save" fix (7 Oct): if a window's custom-protocol IPC fetch ever fails, Tauri switches that window to postMessage for good and raw bytes arrive as a JSON number array. `editor_save` now accepts both (logs a warning when it falls back). Not yet retested on the PC. User said "Publish": version raised to 0.2.1 (five files); release.cmd still to be run by the user.
 - Video picks the best working encoder at run time (x264/x265 if the FFmpeg build has them, else NVIDIA/Intel/AMD/Apple hardware, else Windows Media Foundation or OpenH264). The LGPL FFmpeg build has no x264/x265.
 - Converters download on first use (`src-tauri/src/install.rs`): official releases (GitHub, documentfoundation.org) via the curl built into Windows, unpacked with 7-Zip (itself fetched first, 2 MB), then trimmed: only the programs Convertino runs and the DLLs they import (read from the PE import tables), and for LibreOffice the known extras (other UI languages, spelling dictionaries and thesauri, help, icon themes, PDF import). Hyphenation patterns stay. Progress shows on the job's ring/card; Cancel stops it. Installed builds keep them in %LOCALAPPDATA%\Convertino\tools; dev builds in src-tauri/tools. A converter already installed on the PC (e.g. LibreOffice in Program Files) is used instead and never trimmed.
 - Sizes once set up: FFmpeg 190 MB (x264/x265 build), ImageMagick 33, Poppler ~60, Ghostscript ~43, Pandoc 224, LibreOffice ~630, 7-Zip 2 (about 1.1 GB if all are used, was 2.5 GB). First-use downloads: 77, 11, 42, 62, 40, ~350, 2 MB.
@@ -103,3 +104,11 @@ Last updated: 3 Oct 2026. Shared with the Claude Project "Convertino" (claude/co
 - 5 Oct: user said "Publish": version raised to 0.2.0-rc.3 (five files), release.cmd run.
 - Released: Build 8e10f8a green, tag v0.2.0-rc.3, Release run 37235070191 green including Release check (installs on Windows, Intel Mac, Apple silicon; updater files verify). https://github.com/sanyamgoelx/convertino/releases/tag/v0.2.0-rc.3
 - Next: install rc.3, then re-try "compress these" with the three Valorant clips from a Claude chat (pasted paths, and via Ask Claude). Then re-try the same chat (with and without Ask Claude).
+
+## 0.2.0 (final, 6 Oct 2026)
+
+- 6 Oct: rc.3 installed and checked on the PC: Claude now uses Convertino from a chat ("Working"). User said release it.
+- Version raised to 0.2.0 (five files), release.cmd run: Build 2d788d2 green (run 37467310948), tag v0.2.0 pushed.
+- Released: Release run 37469840342 green including Release check (installs on Windows, Intel Mac, Apple silicon; updater files verify). Marked latest (not a pre-release). https://github.com/sanyamgoelx/convertino/releases/tag/v0.2.0
+- First non-pre-release since 0.1.6: installed copies (and the README Download link) update to it.
+- Next: let the installed copy update itself to 0.2.0 (Settings › About); then Release to friends (Mac testers first). Housekeeping: milestone table is stale (Mac builds ship; Save-dialog conversions exist); CI actions on Node 20 are deprecated.

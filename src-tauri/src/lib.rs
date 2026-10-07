@@ -991,8 +991,22 @@ struct SavedFile {
 #[tauri::command]
 fn editor_save(app: AppHandle, window: tauri::WebviewWindow, request: tauri::ipc::Request<'_>) -> Result<SavedFile, String> {
     let original = editor_path(&app, window.label())?;
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("Nothing to save.".into());
+    // The PDF normally arrives raw. If the window's fast IPC channel ever
+    // failed (Tauri then switches that window to postMessage for good), the
+    // same bytes arrive as a JSON array of numbers instead: accept both.
+    let from_json: Vec<u8>;
+    let bytes: &[u8] = match request.body() {
+        tauri::ipc::InvokeBody::Raw(raw) => raw,
+        tauri::ipc::InvokeBody::Json(serde_json::Value::Array(items)) => {
+            log::warn!("editor save arrived as JSON ({} bytes); the custom IPC protocol had failed", items.len());
+            from_json = items
+                .iter()
+                .map(|v| v.as_u64().filter(|n| *n <= 255).map(|n| n as u8))
+                .collect::<Option<Vec<u8>>>()
+                .ok_or_else(|| "The edited PDF didn't arrive intact.".to_string())?;
+            &from_json
+        }
+        _ => return Err("Nothing to save.".into()),
     };
     if !bytes.starts_with(b"%PDF") {
         return Err("The edited PDF came out empty.".into());

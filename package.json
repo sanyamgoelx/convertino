@@ -1,6 +1,6 @@
 {
   "name": "convertino",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Convert any file from a radial wheel in Explorer or Finder",
   "license": "GPL-3.0-or-later",
