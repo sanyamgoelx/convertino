@@ -50,6 +50,8 @@ git config core.autocrlf true
 
 # A leftover lock (an interrupted git command) would stop the commit.
 if (Test-Path ".git\index.lock") { Remove-Item ".git\index.lock" -Force -ErrorAction SilentlyContinue }
+# This PC's own update checks and updates are left out of the download counts.
+& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\stats-own.ps1" 2>&1 | ForEach-Object { Say "  $_" }
 git add -A
 $pending = git status --porcelain
 if ($pending) {

@@ -65,6 +65,11 @@ impl Target {
     }
 }
 
+/// Edit slots open a window instead of converting (the PDF and image editors).
+pub fn opens_window(target_id: &str) -> bool {
+    matches!(target_id, "pdf.edit" | "image.edit" | "raw.edit")
+}
+
 /// Whether a target works on a file with this extension (a PowerPoint in a
 /// selection doesn't go to Markdown with the Word files, for example).
 pub fn target_applies(target_id: &str, ext: &str) -> bool {
@@ -459,7 +464,7 @@ pub fn conversions_for(ext: &str) -> Vec<Conversion> {
     fam.targets
         .iter()
         .chain(fam.more.iter())
-        .filter(|t| t.id != "pdf.edit" && t.applies_to_ext(&ext))
+        .filter(|t| !opens_window(&t.id) && t.applies_to_ext(&ext))
         .map(|t| Conversion { id: t.id.clone(), name: short_name(t), label: t.label.clone(), hint: t.hint.clone(), multi: t.multi })
         .collect()
 }

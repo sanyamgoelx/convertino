@@ -17,3 +17,7 @@ docs/STATUS.md
 docs/BUILD-PLAN.md
 docs/PLAN-RAW-CLI-MCP.md
 docs/*mockup*.html
+stats-dump.cmd
+scripts/stats-dump.ps1
+stats-own.cmd
+_to_delete/

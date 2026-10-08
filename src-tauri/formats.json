@@ -245,21 +245,28 @@
           "hint": "One page per image · several images make one PDF"
         },
         {
+          "id": "image.compress",
+          "label": "Compress",
+          "icon": "compress",
+          "action": true,
+          "hint": "Pick a file size · lowers quality, then resolution"
+        },
+        {
+          "id": "image.edit",
+          "label": "Edit",
+          "icon": "edit",
+          "action": true,
+          "hint": "Crop parts out, straighten, turn"
+        }
+      ],
+      "more": [
+        {
           "id": "image.ico",
           "label": "ICO",
           "icon": "image",
           "ext": "ico",
           "hint": "16 to 256 px sizes in one icon"
         },
-        {
-          "id": "image.compress",
-          "label": "Compress",
-          "icon": "compress",
-          "action": true,
-          "hint": "Pick a file size · lowers quality, then resolution"
-        }
-      ],
-      "more": [
         {
           "id": "image.tiff",
           "label": "TIFF",
@@ -354,6 +361,13 @@
           "icon": "pdf",
           "ext": "pdf",
           "hint": "One page per photo · several photos make one PDF"
+        },
+        {
+          "id": "raw.edit",
+          "label": "Edit",
+          "icon": "edit",
+          "action": true,
+          "hint": "Crop parts out, straighten, turn"
         },
         {
           "id": "raw.webp",

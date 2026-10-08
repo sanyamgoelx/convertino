@@ -234,6 +234,62 @@ pub fn start(
     id
 }
 
+/// Runs steps planned elsewhere (the image editor's crops) as a job on the
+/// corner card. `done`: the card's title when it worked; `exif_from`: a RAW
+/// photo whose EXIF goes into every result; `keep`: held until the job ends
+/// (the developed photo the steps read).
+pub fn start_steps(
+    app: AppHandle,
+    title: String,
+    family: String,
+    done: String,
+    files: Vec<PathBuf>,
+    steps: Vec<convert::Step>,
+    exif_from: Option<PathBuf>,
+    keep: Option<std::sync::Arc<convert::TempDir>>,
+) -> u64 {
+    let id = crate::engine::new_id();
+    std::thread::spawn(move || {
+        let _keep = keep;
+        crate::procs::set_current_job(id);
+        report_downloads(&app, id);
+        crate::show_hud(&app);
+        emit(&app, "job-started", Started { id, title, family, ring: false, via: None });
+        let total = steps.len();
+        let outcome = run_steps(&app, id, &steps);
+        let errors = outcome.errors();
+        let (made, cancelled) = (outcome.made, outcome.cancelled);
+        if let Some(raw) = &exif_from {
+            for m in &made {
+                crate::raw::copy_exif(raw, m);
+            }
+        }
+        log::info!("job {id}: {} made, {} failed", made.len(), errors.len());
+        let size: u64 = made.iter().map(|p| disk_size(p)).sum();
+        let report = !errors.is_empty() && crate::report::remember(id, "image.edit", &files, &errors);
+        let result = if cancelled {
+            Done::plain(id, !made.is_empty(), "Cancelled".into(), format!("{} of {total} saved before you cancelled.", made.len()), !made.is_empty())
+        } else if made.is_empty() {
+            Done { report, ..Done::plain(id, false, "Couldn't save".into(), errors.first().cloned().unwrap_or_else(|| "Unknown error".into()), false) }
+        } else {
+            let mut body = match made.as_slice() {
+                [one] => format!("{} · {}", file_name(one), human_size(size)),
+                many => format!("{} files · {}", many.len(), human_size(size)),
+            };
+            if !errors.is_empty() {
+                body.push_str(&format!("\n{} failed: {}", errors.len(), errors[0]));
+            }
+            let attention = !errors.is_empty();
+            Done { report, attention, ..Done::plain(id, true, done, body, true) }
+        };
+        if let Ok(mut o) = outputs_map().lock() {
+            o.insert(id, made);
+        }
+        emit(&app, "job-done", result);
+    });
+    id
+}
+
 /// The first original whose folder couldn't be written: (that folder's name,
 /// where the result went instead, why).
 fn moved_elsewhere(files: &[PathBuf], made: &[PathBuf]) -> Option<(String, String, convert::Blocked)> {

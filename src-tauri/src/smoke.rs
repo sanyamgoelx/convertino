@@ -25,8 +25,8 @@ fn describe(p: &Path) -> String {
 
 fn convert_one(target: &str, files: &[PathBuf], report: &mut String) -> bool {
     let started = Instant::now();
-    if target == "pdf.edit" {
-        let _ = writeln!(report, "  note {target}: opens the PDF editor (checked separately)");
+    if crate::wheel::opens_window(target) {
+        let _ = writeln!(report, "  note {target}: opens an editor window (checked separately)");
         return true;
     }
     let steps = match convert::plan(target, files) {

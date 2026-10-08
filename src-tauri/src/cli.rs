@@ -909,6 +909,8 @@ mod tests {
         assert_eq!(r("png", "png"), None, "same format is not a conversion");
         assert_eq!(r("docx", "pdf"), None);
         assert_eq!(r("edit", "pdf"), None, "the PDF editor needs the app");
+        assert_eq!(r("edit", "png"), None, "the image editor needs the app");
+        assert_eq!(r("edit", "cr3"), None);
         assert_eq!(r("jpg", "xyz"), None);
     }
 

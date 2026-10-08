@@ -1,6 +1,12 @@
 # Every hour: download counts for each release, written to stats/downloads.json
 # on the "stats" branch (one commit, replaced each time, so main stays clean).
 # The Convertino Downloads page reads it from there.
+#
+# Test downloads are taken out (ci/download-stats.py): the ones our own
+# Build / Release check jobs make, worked out from GitHub's job records and
+# kept in stats/ci-ledger.json, and the ones listed in
+# .github/stats-exclude.json (the developer's own copy updating, etc.).
+# "raw" next to each release keeps GitHub's own totals.
 name: Stats
 
 on:
@@ -10,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: stats
@@ -19,37 +26,17 @@ jobs:
   stats:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Count downloads
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api "repos/${{ github.repository }}/releases?per_page=100" > releases.json
-          python3 - <<'PY'
-          import json, datetime
-          rels = []
-          for r in json.load(open("releases.json")):
-              if r["draft"]:
-                  continue
-              c = dict(tag=r["tag_name"], publishedAt=r["published_at"], windows=0, macArm=0, macIntel=0, macUpdates=0, updateChecks=0)
-              for a in r["assets"]:
-                  n, k = a["name"], a["download_count"]
-                  if n.endswith(".sig"):
-                      continue
-                  if n.endswith("-setup.exe") or n.endswith(".msi"):
-                      c["windows"] += k
-                  elif n.endswith("aarch64.dmg"):
-                      c["macArm"] += k
-                  elif n.endswith("x64.dmg"):
-                      c["macIntel"] += k
-                  elif n.endswith(".app.tar.gz"):
-                      c["macUpdates"] += k
-                  elif n == "latest.json":
-                      c["updateChecks"] += k
-              rels.append(c)
-          now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-          json.dump({"takenAt": now, "releases": rels}, open("downloads.json", "w"), indent=1)
-          print(open("downloads.json").read())
-          PY
+          gh api "repos/${{ github.repository }}/contents/stats/ci-ledger.json?ref=stats" \
+            -H "Accept: application/vnd.github.raw" > old-ledger.json 2>/dev/null || echo '{}' > old-ledger.json
+          python3 -c "import json; json.load(open('old-ledger.json'))" 2>/dev/null || echo '{}' > old-ledger.json
+          python3 ci/download-stats.py --ledger old-ledger.json --exclude .github/stats-exclude.json \
+            --out downloads.json --new-ledger ci-ledger.json
 
       - name: Publish to the stats branch
         run: |
@@ -57,6 +44,6 @@ jobs:
           git init -q -b stats
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          mkdir stats && cp ../downloads.json stats/
+          mkdir stats && cp ../downloads.json ../ci-ledger.json stats/
           git add stats && git commit -q -m "Download counts"
           git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:stats

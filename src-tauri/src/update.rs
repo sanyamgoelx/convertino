@@ -40,12 +40,33 @@ fn view(app: &AppHandle) -> UpdateView {
     }
 }
 
+/// Every request to GitHub (an update check reads latest.json, an update
+/// downloads the installer), one line each in update-history.log next to the
+/// log: "<UTC time> check|download <version>". GitHub counts these as
+/// downloads; on the developer's PC scripts/stats-own.ps1 reads this file so
+/// the download counts leave his own copy out. Nothing is sent anywhere.
+fn record(app: &AppHandle, what: &str, version: &str) {
+    use std::io::Write;
+    let Ok(dir) = app.path().app_log_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("update-history.log")) {
+        let _ = writeln!(f, "{secs} {what} {version}");
+    }
+}
+
 async fn check(app: &AppHandle) -> Result<UpdateView, String> {
     if cfg!(debug_assertions) {
         return Ok(view(app));
     }
     let updater = app.updater().map_err(|e| e.to_string())?;
     let found = updater.check().await.map_err(|e| format!("Couldn't check for updates: {e}"))?;
+    // latest.json belongs to the newest release: the found version, or ours when up to date.
+    let latest = found.as_ref().map(|u| u.version.clone()).unwrap_or_else(|| app.package_info().version.to_string());
+    record(app, "check", &latest);
     if let Ok(mut s) = app.state::<UpdateState>().0.lock() {
         *s = found.map(|u| (u.version.clone(), u.body.clone()));
     }
@@ -84,6 +105,8 @@ pub async fn update_install(app: AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| format!("Couldn't check for updates: {e}"))?
         .ok_or("Convertino is up to date.")?;
+    record(&app, "check", &update.version);
+    record(&app, "download", &update.version);
     log::info!("updating to {}", update.version);
     // Nothing should be converting while files are replaced.
     crate::procs::cancel_all();

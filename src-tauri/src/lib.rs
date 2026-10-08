@@ -19,6 +19,7 @@ mod connect;
 mod convert;
 mod data;
 mod engine;
+mod image_edit;
 mod install;
 mod jobs;
 mod look;
@@ -167,11 +168,15 @@ fn wheel_pick(
     size: Option<size::Ask>,
 ) -> u64 {
     settings::record_pick(&target_id);
-    if target_id == "pdf.edit" {
+    if wheel::opens_window(&target_id) {
         hide_wheel(&app);
-        let first = state.wheel.lock().ok().and_then(|w| w.clone()).and_then(|m| m.files.into_iter().find(|f| f.family == "pdf"));
+        let first = state.wheel.lock().ok().and_then(|w| w.clone()).and_then(|m| m.files.into_iter().find(|f| f.family == family));
         if let Some(f) = first.filter(|f| std::path::Path::new(&f.path).is_file()) {
-            open_editor(&app, PathBuf::from(f.path));
+            if target_id == "pdf.edit" {
+                open_editor(&app, PathBuf::from(f.path));
+            } else {
+                image_edit::open(&app, PathBuf::from(f.path));
+            }
         }
         return 0;
     }
@@ -1386,6 +1391,12 @@ pub fn run() {
             editor_bytes,
             editor_save,
             editor_close,
+            image_edit::imgedit_file,
+            image_edit::imgedit_bytes,
+            image_edit::imgedit_prepare,
+            image_edit::imgedit_preview_bytes,
+            image_edit::imgedit_save,
+            image_edit::imgedit_close,
             job_reveal,
             job_cancel,
             ask_claude,

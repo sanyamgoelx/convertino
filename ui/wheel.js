@@ -226,9 +226,9 @@ function start(s, quality, remember) {
 }
 
 function launch(s, args) {
-  // Edit opens the PDF editor window instead of converting; with the ring
+  // Edit opens an editor window (PDF or image) instead of converting; with the ring
   // turned off in Settings, progress goes straight to the corner card.
-  if (args.targetId === "pdf.edit" || (model && model.ring === false)) {
+  if (/\.edit$/.test(args.targetId) || (model && model.ring === false)) {
     return animateOut(() => tauri && tauri.core.invoke("wheel_pick", args));
   }
   pick(s, args);

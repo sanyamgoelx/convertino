@@ -5,6 +5,9 @@
 # (what installed copies update from) points at files whose signatures verify.
 # Runs after every Release; can also be started by hand for any tag.
 name: Release check
+# The tag in the run name lets ci/download-stats.py tell which release a
+# hand-started check downloaded (those runs are on main, not the tag).
+run-name: Release check ${{ inputs.tag }}
 
 on:
   workflow_call:
