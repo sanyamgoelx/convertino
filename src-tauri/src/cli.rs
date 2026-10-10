@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! convertino <files…> --to <target> [--size 25MB] [--quality small|balanced|best]
-//!            [--out <folder>] [--together] [--json] [--quiet]
+//!            [--out <folder>] [--together] [--json] [--progress] [--quiet]
 //! convertino formats <files…> [--json]
 //! convertino tools [status | install <name> | install --all] [--json]
 //! convertino mcp
@@ -58,6 +58,7 @@ Options:
   --quality <q>        small, balanced or best (default: as in Convertino Settings)
   --out <folder>       save there instead of next to the originals
   --json               print the result as JSON
+  --progress           progress as JSON lines on stderr, for apps that run Convertino
   --quiet              print nothing but errors
   -h, --help           this help
   -V, --version        the version
@@ -74,6 +75,7 @@ pub struct ConvertArgs {
     pub quality: Option<String>,
     pub out: Option<PathBuf>,
     pub json: bool,
+    pub progress: bool,
     pub quiet: bool,
 }
 
@@ -179,6 +181,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             "--out" | "-o" => c.out = Some(PathBuf::from(take(&mut i, "--out")?)),
             "--together" => c.together = true,
             "--json" => c.json = true,
+            "--progress" => c.progress = true,
             "--quiet" => c.quiet = true,
             "--all" if sub == Some("tools") => all = true,
             "-h" | "--help" => return Ok(Command::Help),
@@ -391,6 +394,41 @@ fn enable_ansi() -> bool {
     true
 }
 
+/// Progress for apps (--progress): one JSON object per line on stderr,
+/// {"type":"progress"|"download","file":…,"fraction":0.0–1.0,"detail":…},
+/// at most each whole percent or once a second, so a reader is never flooded.
+struct JsonProgress {
+    last: Mutex<(f64, Option<Instant>)>,
+}
+
+impl JsonProgress {
+    fn new() -> Self {
+        JsonProgress { last: Mutex::new((0.0, None)) }
+    }
+    fn emit(&self, kind: &str, file: &str, fraction: f64, detail: &str) {
+        let now = Instant::now();
+        let Ok(mut last) = self.last.lock() else { return };
+        let since = last.1.map(|t| now.duration_since(t).as_secs_f64());
+        if !worth_printing(last.0, since, fraction) {
+            return;
+        }
+        *last = (fraction, Some(now));
+        let f = (fraction.clamp(0.0, 1.0) * 1000.0).round() / 1000.0;
+        let line = serde_json::json!({ "type": kind, "file": file, "fraction": f, "detail": detail });
+        let mut e = std::io::stderr().lock();
+        let _ = writeln!(e, "{line}");
+        let _ = e.flush();
+    }
+}
+
+/// Print the first update, then on each whole percent, after a second without one, or on reaching 100 %.
+fn worth_printing(last: f64, since: Option<f64>, now: f64) -> bool {
+    match since {
+        None => true,
+        Some(s) => (now - last).abs() >= 0.01 - 1e-9 || s >= 1.0 || (now >= 1.0 && last < 1.0),
+    }
+}
+
 /// The progress line on stderr (terminal only).
 struct Bar {
     on: bool,
@@ -529,11 +567,22 @@ pub fn run_convert(c: &ConvertArgs) -> i32 {
             many => format!("{} files", many.len()),
         };
         let (b, quiet, json) = (bar.clone(), c.quiet, c.json);
+        let jp = c.progress.then(|| Arc::new(JsonProgress::new()));
         let painted = Style { on: style.on };
         let lines = Arc::new(Mutex::new(()));
         let sink: Sink = Arc::new(move |e| match e {
-            Event::Progress { fraction, detail } => b.draw(&name, fraction, &detail),
-            Event::Download { fraction, detail } => b.draw("Downloading", fraction, &detail),
+            Event::Progress { fraction, detail } => {
+                if let Some(j) = &jp {
+                    j.emit("progress", &name, fraction, &detail);
+                }
+                b.draw(&name, fraction, &detail)
+            }
+            Event::Download { fraction, detail } => {
+                if let Some(j) = &jp {
+                    j.emit("download", &name, fraction, &detail);
+                }
+                b.draw("Downloading", fraction, &detail)
+            }
             Event::StepDone { inputs, result, seconds, .. } => {
                 if quiet || json {
                     if let (Err(e), false) = (&result, json) {
@@ -821,6 +870,26 @@ mod tests {
         assert_eq!(parse_size("ten MB"), None);
         assert_eq!(parse_size("25 parsecs"), None);
         assert_eq!(parse_size(""), None);
+    }
+
+    #[test]
+    fn progress_flag() {
+        let d = tmp_dir("progress");
+        let a = touch(&d, "clip.mp4");
+        let Command::Convert(c) = parse(&args(&[&a, "--to", "compress", "--json", "--progress"])).unwrap() else { panic!() };
+        assert!(c.progress && c.json);
+        let Command::Convert(c) = parse(&args(&[&a, "--to", "compress"])).unwrap() else { panic!() };
+        assert!(!c.progress);
+    }
+
+    #[test]
+    fn progress_throttle() {
+        assert!(worth_printing(0.0, None, 0.0)); // the first update always shows
+        assert!(!worth_printing(0.100, Some(0.2), 0.105)); // under a percent, under a second
+        assert!(worth_printing(0.100, Some(0.2), 0.110)); // a whole percent
+        assert!(worth_printing(0.100, Some(1.5), 0.101)); // a second has passed
+        assert!(worth_printing(0.995, Some(0.1), 1.0)); // finishing always shows
+        assert!(!worth_printing(1.0, Some(0.1), 1.0));
     }
 
     #[test]
