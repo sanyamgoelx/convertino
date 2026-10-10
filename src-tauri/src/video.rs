@@ -806,23 +806,101 @@ fn look_key(enc: &str, q: Quality, input: &Path, p: &Probe, scale_to: Option<u32
     format!("{enc}|{q:?}|{w}x{h}|{fps}|{}|{step}", p.video.as_deref().unwrap_or("?")).to_lowercase()
 }
 
-fn look_recall(key: &str) -> Option<u32> {
-    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(look_path()?).ok()?).ok()?;
-    v.get(key)?.as_u64().map(|x| x as u32)
+// Once the same setting has won TRUST_AFTER full checks in a row for a kind of
+// video, Compress uses it without measuring; every CHECK_EVERY-th video of that
+// kind is measured again (a spot check), and any change starts the count over.
+
+/// Full checks in a row that must agree before a setting is used unmeasured.
+const TRUST_AFTER: u64 = 3;
+/// One video in this many of a trusted kind is still measured.
+const CHECK_EVERY: u64 = 10;
+
+/// One kind of video in video-look.json.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Remembered {
+    value: u32,
+    /// Full checks in a row that chose `value`.
+    confirmed: u64,
+    /// Videos that used it unmeasured since the last full check.
+    since: u64,
+    /// Size of the result next to the source, from the last full check.
+    ratio: f64,
 }
 
-fn look_keep(key: &str, value: u32) {
-    let Some(path) = look_path() else { return };
-    let mut v: serde_json::Value = std::fs::read_to_string(&path)
-        .ok()
+fn look_all() -> serde_json::Value {
+    look_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| serde_json::from_str(&t).ok())
         .filter(|v: &serde_json::Value| v.is_object())
-        .unwrap_or_else(|| serde_json::json!({}));
-    v[key] = serde_json::json!(value);
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn look_entry(v: &serde_json::Value, key: &str) -> Option<Remembered> {
+    let e = v.get(key)?;
+    if let Some(x) = e.as_u64() {
+        // Written by the first version of this file: a setting, checked once.
+        return Some(Remembered { value: x as u32, confirmed: 1, since: 0, ratio: 0.0 });
+    }
+    Some(Remembered {
+        value: e.get("value")?.as_u64()? as u32,
+        confirmed: e.get("confirmed").and_then(|x| x.as_u64()).unwrap_or(1),
+        since: e.get("since").and_then(|x| x.as_u64()).unwrap_or(0),
+        ratio: e.get("ratio").and_then(|x| x.as_f64()).unwrap_or(0.0),
+    })
+}
+
+fn look_store(key: &str, r: Remembered) {
+    let Some(path) = look_path() else { return };
+    let mut v = look_all();
+    v[key] = serde_json::json!({ "value": r.value, "confirmed": r.confirmed, "since": r.since, "ratio": (r.ratio * 1000.0).round() / 1000.0 });
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let _ = std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap_or_default());
+}
+
+fn look_recall(key: &str) -> Option<u32> {
+    look_entry(&look_all(), key).map(|r| r.value)
+}
+
+/// After a full check that passed: the same setting as before adds a
+/// confirmation, a different one starts the count over.
+fn look_keep(key: &str, value: u32, ratio: f64) {
+    let old = look_entry(&look_all(), key);
+    let confirmed = match old {
+        Some(o) if o.value == value => o.confirmed + 1,
+        _ => 1,
+    };
+    look_store(key, Remembered { value, confirmed, since: 0, ratio });
+}
+
+/// The trusted setting for this kind of video, if this video may skip the
+/// check (counted as used); None when it must be measured.
+fn look_trusted(key: &str) -> Option<Remembered> {
+    let r = look_entry(&look_all(), key)?;
+    if !trusted_skip(&r) {
+        return None;
+    }
+    let used = Remembered { since: r.since + 1, ..r };
+    look_store(key, used);
+    Some(used)
+}
+
+/// Confirmed often enough, and not the video due for a spot check.
+fn trusted_skip(r: &Remembered) -> bool {
+    r.confirmed >= TRUST_AFTER && r.since + 1 < CHECK_EVERY && r.ratio > 0.0
+}
+
+/// Size of the whole result next to the source, from the samples' size.
+fn sample_ratio(input: &Path, p: &Probe, spans: &[(f64, f64)], bytes: u64) -> f64 {
+    let sampled: f64 = spans.iter().map(|s| s.1).sum();
+    let duration = p.duration.unwrap_or(sampled);
+    let source_bytes = input.metadata().map(|m| m.len()).unwrap_or(0) as f64;
+    if duration > 0.0 && source_bytes > 0.0 {
+        bytes as f64 / (source_bytes * sampled.min(duration) / duration)
+    } else {
+        0.0
+    }
 }
 
 /// `search`, starting from (and then remembering) the setting that won for
@@ -843,7 +921,7 @@ fn search_kind(
     let start = look_recall(&key);
     let t = search(input, p, enc, q, target, scale_to, spans, dir, start, progress)?;
     if t.score >= target {
-        look_keep(&key, t.value);
+        look_keep(&key, t.value, sample_ratio(input, p, spans, t.bytes));
     }
     Ok(t)
 }
@@ -892,7 +970,9 @@ fn prefer_hardware(sw: &Trial, hw: &Trial, duration: f64, sampled: f64, q: Quali
 
 /// Encoder and setting for a job, measured on samples. None: nothing to
 /// measure with (bitrate-only encoders), use the defaults.
-fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>, progress: &mut dyn FnMut(f64)) -> Result<Option<(Tuned, f64)>, String> {
+/// `trust`: a setting confirmed for this kind of video may be used without
+/// measuring (Compress); size planning (compress to a size) always measures.
+fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>, trust: bool, progress: &mut dyn FnMut(f64)) -> Result<Option<(Tuned, f64)>, String> {
     let mut list = working(codec);
     if list.is_empty() && codec == Codec::Hevc {
         list = working(Codec::H264);
@@ -901,6 +981,21 @@ fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>
     let Some(&first) = list.first() else { return Ok(None) };
     let started = std::time::Instant::now();
     let hardware = list.iter().copied().find(|e| !is_software(e));
+    // The encoder search_kind would measure (not for "Best", which compares two).
+    if trust && q != Quality::Best {
+        let enc = hardware.unwrap_or(first);
+        if let Some(r) = look_trusted(&look_key(enc, q, input, p, scale_to)) {
+            let left = CHECK_EVERY - 1 - r.since;
+            log::info!(
+                "video look: {enc} at {} without measuring (chosen {} times in a row; {})",
+                r.value,
+                r.confirmed,
+                if left == 0 { "the next one gets a full check".to_string() } else { format!("full check again in {left} video(s)") }
+            );
+            progress(1.0);
+            return Ok(Some((Tuned { encoder: enc, value: r.value }, r.ratio)));
+        }
+    }
     let target = q.level().vmaf_target();
     let spans = sample_spans(p.duration);
     let sampled: f64 = spans.iter().map(|s| s.1).sum();
@@ -1013,7 +1108,7 @@ pub fn run_to_size(
     if plan.quality_mode {
         let opts = Opts::from_quality(&crate::settings::get().quality);
         share = 0.2;
-        match tune(input, &p, Codec::Hevc, opts.quality, None, &mut |f| progress(f * 0.2)) {
+        match tune(input, &p, Codec::Hevc, opts.quality, None, false, &mut |f| progress(f * 0.2)) {
             Ok(Some((t, ratio))) if ratio * info.bytes as f64 <= target as f64 * 0.9 => {
                 log::info!("video size: {} at {} fits ({:.0}% of the source)", t.encoder, t.value, ratio * 100.0);
                 let mut args = args_with(Job::Compress, &p, &opts, Some(&t))?;
@@ -1100,7 +1195,7 @@ pub fn run(input: &Path, job: Job, opts: &Opts, output: &Path, progress: &mut dy
     let mut share = 0.0;
     if let (true, Some((codec, scale_to))) = (opts.tune, encode_of(job, &p)) {
         share = 0.2;
-        match tune(input, &p, codec, opts.quality, scale_to, &mut |f| progress(f * 0.2)) {
+        match tune(input, &p, codec, opts.quality, scale_to, job == Job::Compress, &mut |f| progress(f * 0.2)) {
             Ok(Some((t, ratio))) => {
                 log::info!("video {job:?}: {} at {}, about {:.0}% of the source", t.encoder, t.value, ratio * 100.0);
                 if job == Job::Compress && ratio > 0.9 {
@@ -1246,7 +1341,7 @@ mod look_tests {
             .unwrap()
             .success());
         let p = probe(&src).unwrap();
-        let (t, ratio) = tune(&src, &p, Codec::Hevc, Quality::High, None, &mut |_| {}).unwrap().unwrap();
+        let (t, ratio) = tune(&src, &p, Codec::Hevc, Quality::High, None, false, &mut |_| {}).unwrap().unwrap();
         println!("tuned: {t:?}, about {:.0}% of the source", ratio * 100.0);
         let tmp = crate::convert::TempDir::new("vlook-check").unwrap();
         let check = trial(&src, &p, t.encoder, t.value, Quality::High, None, &sample_spans(p.duration), &tmp.0).unwrap();
@@ -1280,6 +1375,21 @@ mod look_tests {
         let t = trial(&src, &p, "libx264", 12, Quality::High, None, &sample_spans(p.duration), &tmp.0).unwrap();
         assert!(t.score > 93.0, "near-lossless sample scored {}", t.score);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn trusted_settings_get_spot_checks() {
+        let r = |confirmed, since| Remembered { value: 30, confirmed, since, ratio: 0.3 };
+        assert!(!trusted_skip(&r(2, 0)), "two checks aren't enough");
+        assert!(trusted_skip(&r(3, 0)));
+        // Videos 1–9 after a full check skip it, the 10th is measured.
+        let skipped = (0..CHECK_EVERY).filter(|&since| trusted_skip(&r(3, since))).count() as u64;
+        assert_eq!(skipped, CHECK_EVERY - 1);
+        assert!(!trusted_skip(&r(5, CHECK_EVERY - 1)));
+        // No size estimate yet (entry from the first version): measure.
+        assert!(!trusted_skip(&Remembered { ratio: 0.0, ..r(5, 0) }));
+        let old = serde_json::json!({ "k": 33 });
+        assert_eq!(look_entry(&old, "k"), Some(Remembered { value: 33, confirmed: 1, since: 0, ratio: 0.0 }));
     }
 
     #[test]

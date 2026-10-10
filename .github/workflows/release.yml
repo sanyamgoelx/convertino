@@ -1,8 +1,10 @@
-# Publishes a release when a version tag is pushed (release.cmd does that):
-# builds Windows and both Macs, uploads the installers to a GitHub Release,
-# and writes latest.json, which installed copies read to update themselves.
-# Everything is signed for the updater with TAURI_SIGNING_PRIVATE_KEY
-# (set up once by release-setup.cmd).
+# Publishes a release when a version tag is pushed (release.cmd does that, and
+# only after the Build run for that commit passed on all three machines).
+# Build already made the installers and signed them for the updater
+# (TAURI_SIGNING_PRIVATE_KEY, set up once by release-setup.cmd), so nothing is
+# built again here: the passed Build run's installers are published as they
+# are, with latest.json, which installed copies read to update themselves.
+# (Until 0.2.4 tauri-action built everything a second time: ~20 min.)
 name: Release
 
 on:
@@ -16,105 +18,35 @@ permissions:
 
 jobs:
   release:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: windows
-            os: windows-latest
-          - name: macos-apple-silicon
-            os: macos-14
-          - name: macos-intel
-            os: macos-15-intel
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.name }}
-
+    runs-on: ubuntu-latest
+    name: publish
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      # shared-key: Build and Release use the same compiled dependencies, so a
-      # release doesn't start from scratch.
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: "./src-tauri -> target"
-          shared-key: ${{ matrix.name }}
-          save-if: false
-
-      - name: Install JS dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Retina background for the .dmg window
-        if: runner.os == 'macOS'
-        run: tiffutil -cathidpicheck src-tauri/installer/dmg-background.png src-tauri/installer/dmg-background@2x.png -out src-tauri/installer/dmg-background.tiff
-
-      # The Mac converters only change when Homebrew does: rebuilt once a month
-      # (or when the script changes) instead of on every run.
-      - name: Month (for the converter cache)
-        if: runner.os == 'macOS'
-        id: month
-        run: echo "m=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
-
-      - name: Cached Mac converters
-        if: runner.os == 'macOS'
-        id: tools
-        uses: actions/cache@v4
-        with:
-          path: src-tauri/mac-tools
-          key: mac-tools-${{ matrix.name }}-${{ hashFiles('ci/bundle-mac-tools.sh') }}-${{ steps.month.outputs.m }}
-
-      - name: Bundle the Mac converters
-        if: runner.os == 'macOS' && steps.tools.outputs.cache-hit != 'true'
-        run: bash ci/bundle-mac-tools.sh src-tauri/mac-tools
-
-      # The `convertino` command goes into the installers next to the app.
-      - name: Build the convertino command
-        working-directory: src-tauri
+      - name: Installers from the passed Build run
         env:
-          CONVERTINO_REPORT_WEBHOOK: ${{ secrets.CONVERTINO_REPORT_WEBHOOK }}
-        run: cargo build --release --bin convertino-cli
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq '.[0].databaseId')
+          if [ -z "$run" ]; then
+            echo "::error::No passed Build run for $GITHUB_SHA. release.cmd waits for one; run Build on this commit first."
+            exit 1
+          fi
+          echo "Build run $run"
+          for n in windows macos-apple-silicon macos-intel; do
+            for try in 1 2 3; do
+              gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "convertino-$n" --dir "in/convertino-$n" && break
+              if [ "$try" = 3 ]; then exit 1; fi
+              echo "::warning::Download of convertino-$n failed (try $try of 3); trying again"
+              rm -rf "in/convertino-$n"; sleep 15
+            done
+          done
+          find in -type f | sort
 
-      # hdiutil (making the .dmg) fails now and then with "Resource busy" on GitHub's
-      # Macs while XProtect scans the new image: stop XProtect first.
-      - name: Make room for the disk image (Mac)
-        if: runner.os == 'macOS'
-        run: sudo pkill -9 XProtect >/dev/null 2>&1 || true
-
-      - name: Build and publish
-        uses: tauri-apps/tauri-action@v0
+      - name: Publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          CONVERTINO_REPORT_WEBHOOK: ${{ secrets.CONVERTINO_REPORT_WEBHOOK }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Convertino ${{ github.ref_name }}"
-          releaseBody: |
-            Convert any file from a radial wheel: **hold Alt and right-click a file** in File Explorer (on a Mac: hold Option and right-click in Finder), then pick a format. That's the default and needs no setup. Prefer the keyboard? A shortcut is also available, changeable in Settings › General.
-
-            **Which file do I download?**
-            - Windows: `Convertino_…_x64-setup.exe`
-            - Mac with Apple silicon (M1 and later): `Convertino_…_aarch64.dmg`
-            - Mac with Intel: `Convertino_…_x64.dmg`
-
-            Installed copies update themselves from here (Settings › About).
-
-            **First launch:** Windows may say "Windows protected your PC": click *More info* › *Run anyway*. On a Mac, open System Settings › Privacy & Security and click *Open Anyway* once. Full steps in the README.
-          releaseDraft: false
-          # v0.2.0-rc.1 and the like: a pre-release. Installed copies and the
-          # Download link follow "latest", which skips pre-releases.
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          updaterJsonPreferNsis: true
-          # Making the .dmg fails at random now and then on GitHub's Macs.
-          retryAttempts: 2
-          args: ${{ runner.os == 'macOS' && '--bundles app,dmg' || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ci/publish-release.py "$GITHUB_REF_NAME" in
 
   # The published files, downloaded and installed the way people get them.
   verify:

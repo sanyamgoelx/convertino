@@ -2,14 +2,6 @@
     "note":  "Test downloads left out of the download counts (ci/download-stats.py). CI downloads are worked out automatically; this lists the rest. own:* entries come from scripts/stats-own.ps1.",
     "entries":  [
                     {
-                        "id":  "own:windows:0.1.4:2026-10-02T11:05:00Z",
-                        "tag":  "v0.1.4",
-                        "bucket":  "windows",
-                        "count":  1,
-                        "at":  "2026-10-02T11:05:00Z",
-                        "why":  "developer\u0027s own copy of Convertino"
-                    },
-                    {
                         "id":  "own:updateChecks:0.1.4:2026-10-02T11:05:00Z",
                         "tag":  "v0.1.4",
                         "bucket":  "updateChecks",
@@ -18,11 +10,11 @@
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
-                        "id":  "own:windows:0.1.5:2026-10-02T12:08:54Z",
-                        "tag":  "v0.1.5",
+                        "id":  "own:windows:0.1.4:2026-10-02T11:05:00Z",
+                        "tag":  "v0.1.4",
                         "bucket":  "windows",
                         "count":  1,
-                        "at":  "2026-10-02T12:08:54Z",
+                        "at":  "2026-10-02T11:05:00Z",
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
@@ -34,17 +26,25 @@
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
-                        "id":  "own:windows:0.1.6:2026-10-02T13:22:47Z",
-                        "tag":  "v0.1.6",
+                        "id":  "own:windows:0.1.5:2026-10-02T12:08:54Z",
+                        "tag":  "v0.1.5",
                         "bucket":  "windows",
                         "count":  1,
-                        "at":  "2026-10-02T13:22:47Z",
+                        "at":  "2026-10-02T12:08:54Z",
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
                         "id":  "own:updateChecks:0.1.6:2026-10-02T13:22:47Z",
                         "tag":  "v0.1.6",
                         "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-02T13:22:47Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:windows:0.1.6:2026-10-02T13:22:47Z",
+                        "tag":  "v0.1.6",
+                        "bucket":  "windows",
                         "count":  1,
                         "at":  "2026-10-02T13:22:47Z",
                         "why":  "developer\u0027s own copy of Convertino"
@@ -58,14 +58,6 @@
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
-                        "id":  "own:windows:0.2.0:2026-10-07T05:45:17Z",
-                        "tag":  "v0.2.0",
-                        "bucket":  "windows",
-                        "count":  1,
-                        "at":  "2026-10-07T05:45:17Z",
-                        "why":  "developer\u0027s own copy of Convertino"
-                    },
-                    {
                         "id":  "own:updateChecks:0.2.0:2026-10-07T05:45:17Z",
                         "tag":  "v0.2.0",
                         "bucket":  "updateChecks",
@@ -74,11 +66,11 @@
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
-                        "id":  "own:windows:0.2.1:2026-10-07T06:06:15Z",
-                        "tag":  "v0.2.1",
+                        "id":  "own:windows:0.2.0:2026-10-07T05:45:17Z",
+                        "tag":  "v0.2.0",
                         "bucket":  "windows",
                         "count":  1,
-                        "at":  "2026-10-07T06:06:15Z",
+                        "at":  "2026-10-07T05:45:17Z",
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
@@ -90,17 +82,25 @@
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
-                        "id":  "own:windows:0.2.2:2026-10-07T09:32:35Z",
-                        "tag":  "v0.2.2",
+                        "id":  "own:windows:0.2.1:2026-10-07T06:06:15Z",
+                        "tag":  "v0.2.1",
                         "bucket":  "windows",
                         "count":  1,
-                        "at":  "2026-10-07T09:32:35Z",
+                        "at":  "2026-10-07T06:06:15Z",
                         "why":  "developer\u0027s own copy of Convertino"
                     },
                     {
                         "id":  "own:updateChecks:0.2.2:2026-10-07T09:32:35Z",
                         "tag":  "v0.2.2",
                         "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-07T09:32:35Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:windows:0.2.2:2026-10-07T09:32:35Z",
+                        "tag":  "v0.2.2",
+                        "bucket":  "windows",
                         "count":  1,
                         "at":  "2026-10-07T09:32:35Z",
                         "why":  "developer\u0027s own copy of Convertino"
@@ -135,6 +135,86 @@
                         "bucket":  "updateChecks",
                         "count":  1,
                         "at":  "2026-10-10T06:17:36Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:updateChecks:0.2.4:2026-10-10T08:08:51Z",
+                        "tag":  "v0.2.4",
+                        "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-10T08:08:51Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:windows:0.2.4:2026-10-10T08:08:51Z",
+                        "tag":  "v0.2.4",
+                        "bucket":  "windows",
+                        "count":  1,
+                        "at":  "2026-10-10T08:08:51Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:updateChecks:0.2.4:2026-10-10T08:09:51Z",
+                        "tag":  "v0.2.4",
+                        "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-10T08:09:51Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:updateChecks:0.2.4:2026-10-10T08:12:26Z",
+                        "tag":  "v0.2.4",
+                        "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-10T08:12:26Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:updateChecks:0.2.4:2026-10-10T08:14:17Z",
+                        "tag":  "v0.2.4",
+                        "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-10T08:14:17Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:updateChecks:0.2.4:2026-10-10T08:27:48Z",
+                        "tag":  "v0.2.4",
+                        "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-10T08:27:48Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:updateChecks:0.2.4:2026-10-10T08:31:55Z",
+                        "tag":  "v0.2.4",
+                        "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-10T08:31:55Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:updateChecks:0.2.5:2026-10-10T08:52:41Z",
+                        "tag":  "v0.2.5",
+                        "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-10T08:52:41Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:updateChecks:0.2.5:2026-10-10T08:53:57Z",
+                        "tag":  "v0.2.5",
+                        "bucket":  "updateChecks",
+                        "count":  1,
+                        "at":  "2026-10-10T08:53:57Z",
+                        "why":  "developer\u0027s own copy of Convertino"
+                    },
+                    {
+                        "id":  "own:windows:0.2.5:2026-10-10T08:53:57Z",
+                        "tag":  "v0.2.5",
+                        "bucket":  "windows",
+                        "count":  1,
+                        "at":  "2026-10-10T08:53:57Z",
                         "why":  "developer\u0027s own copy of Convertino"
                     }
                 ]

@@ -155,13 +155,18 @@ jobs:
           codesign --verify --deep --verbose=2 "$app" || true
           codesign -d --entitlements - "$app" 2>&1 | grep -q automation.apple-events || { echo "Missing apple-events entitlement"; exit 1; }
 
+      # The installers plus the updater files and their signatures: a release
+      # publishes exactly these (release.yml), without building again.
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
           name: convertino-${{ matrix.name }}
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
 
       # ---- Mac checks: real conversions with the bundled converters ----
