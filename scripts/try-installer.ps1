@@ -4,7 +4,7 @@ $ErrorActionPreference = "Continue"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $gh = "$env:ProgramFiles\GitHub CLI\gh.exe"
 $repo = "sanyamgoelx/convertino"
-$log = "try-installer.log"
+$log = "logs\try-installer.log"
 $id = & $gh run list --repo $repo --workflow Build --branch main --limit 1 --json databaseId --jq ".[0].databaseId"
 "run $id" | Set-Content -Path $log -Encoding utf8
 $dir = ".sync\ci-installer-$id"

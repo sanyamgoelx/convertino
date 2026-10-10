@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Continue"  # git and gh write progress to stderr
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$log = Join-Path (Get-Location) "github.log"
+$log = Join-Path (Get-Location) "logs\github.log"
 function Say($m) { Write-Host $m; Add-Content -Path $log -Value $m -Encoding utf8 }
 "Convertino GitHub $(Get-Date -Format s)" | Set-Content -Path $log -Encoding utf8
 $env:GIT_TERMINAL_PROMPT = "0"

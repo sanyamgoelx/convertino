@@ -21,6 +21,19 @@ pub struct Pair {
     pub right_label: String,
 }
 
+/// Results that are a clip from part of the original (Settings' "Test on a
+/// file"): where in the original the clip starts.
+fn offsets() -> &'static std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, f64>> {
+    static O: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, f64>>> = std::sync::OnceLock::new();
+    O.get_or_init(Default::default)
+}
+
+pub fn set_offset(result: &Path, seconds: f64) {
+    if let Ok(mut o) = offsets().lock() {
+        o.insert(result.to_path_buf(), seconds);
+    }
+}
+
 /// Longest side of the pictures shown.
 const SIDE: u32 = 2000;
 
@@ -38,11 +51,13 @@ pub fn pair(id: u64, index: usize) -> Result<Pair, String> {
     } else if video_exts.contains(&ext(&original).as_str()) {
         let d = crate::video::probe(&result).ok().and_then(|p| p.duration).unwrap_or(2.0);
         let at = d / 2.0;
-        let what = format!("Frame at {}:{:02}", (at / 60.0) as u32, (at % 60.0) as u32);
+        let offset = offsets().lock().ok().and_then(|o| o.get(&result).copied()).unwrap_or(0.0);
+        let shown = at + offset;
+        let what = format!("Frame at {}:{:02}", (shown / 60.0) as u32, (shown % 60.0) as u32);
         // The result's frame, scaled back up to the original's size, shows what was lost.
         let o = crate::video::probe(&original).ok();
         let (w, h) = o.map(|p| (p.width, p.height)).unwrap_or((0, 0));
-        (frame(&original, at, None, &tmp.0, "a")?, frame(&result, at, Some((w, h)), &tmp.0, "b")?, what)
+        (frame(&original, shown, None, &tmp.0, "a")?, frame(&result, at, Some((w, h)), &tmp.0, "b")?, what)
     } else {
         let px = picture_size(&original);
         (picture(&original, None, &tmp.0, "a")?, picture(&result, px, &tmp.0, "b")?, String::new())
@@ -56,7 +71,7 @@ pub fn pair(id: u64, index: usize) -> Result<Pair, String> {
         left,
         right,
         left_label: format!("Original · {}", size(&original)),
-        right_label: format!("Compressed · {}", size(&result)),
+        right_label: if offsets().lock().is_ok_and(|o| o.contains_key(&result)) { "Test sample".to_string() } else { format!("Compressed · {}", size(&result)) },
     })
 }
 

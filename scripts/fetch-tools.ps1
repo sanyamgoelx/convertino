@@ -2,9 +2,9 @@
 # own downloader (src-tauri\src\install.rs): the same downloads, trimming and
 # checks a friend's PC goes through the first time it needs each converter.
 # Converters already there are trimmed instead of downloaded again.
-# Output is mirrored to tools.log.
+# Output is mirrored to logs\tools.log.
 $root = Split-Path -Parent $PSScriptRoot
-$log = Join-Path $root 'tools.log'
+$log = Join-Path $root 'logs\tools.log'
 Set-Location (Join-Path $root 'src-tauri')
 Set-Content -Path $log -Value "Convertino tools $(Get-Date -Format s)" -Encoding UTF8
 $ErrorActionPreference = 'Continue'
@@ -17,5 +17,5 @@ Write-Host 'Building the downloader (the first time takes a few minutes)...' -Fo
     Write-Host $line
     Add-Content -Path $log -Value $line -Encoding UTF8
 }
-if ($LASTEXITCODE -eq 0) { Write-Host 'TOOLS READY' -ForegroundColor Green } else { Write-Host 'Some tools are missing; see tools.log.' -ForegroundColor Red }
+if ($LASTEXITCODE -eq 0) { Write-Host 'TOOLS READY' -ForegroundColor Green } else { Write-Host 'Some tools are missing; see logs\tools.log.' -ForegroundColor Red }
 Add-Content -Path $log -Value "exit $LASTEXITCODE" -Encoding UTF8

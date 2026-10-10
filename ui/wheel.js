@@ -262,6 +262,62 @@ const OPTIONS = {
 };
 const DEFAULT_Q = { jpg: 90, webp: 85, resize: 1920, convertMax: 0, dpi: 150, pdfCompress: "balanced", mp3: 320, video: "balanced", gifWidth: 480, gifSeconds: 30, image: "balanced" };
 
+// Tune for one conversion: the main settings behind the chosen preset
+// (model.presets holds every preset as tuned in Settings).
+const GRADE_NAMES = { small: "Smaller", balanced: "Balanced", best: "Best" };
+const QUICK_TUNE = {
+  image: [
+    { k: "look", label: "How close it must look", min: 50, max: 95, step: 1 },
+    { k: "stripGps", label: "Remove location (GPS)", toggle: true },
+  ],
+  video: [
+    { k: "look", label: "How close it must look", min: 80, max: 99, step: 0.5 },
+    { k: "encoder", label: "Encode on", options: [["gpu", "Graphics card (fast)"], ["cpu", "Processor (smaller files)"], ["auto", "Auto"]] },
+  ],
+};
+
+function tuneKindOf(slotId) {
+  const keys = OPTIONS[slotId] || [];
+  if (keys.includes("video")) return { kind: "video", key: "video" };
+  if (keys.includes("image")) return { kind: "image", key: "image" };
+  return null;
+}
+
+function quickTuneHtml() {
+  const tk = optsFor && optsFor.slot && tuneKindOf(optsFor.slot.id);
+  if (!tk || !model || !model.presets) return "";
+  const grade = optsFor.q[tk.key] === "high" ? "best" : optsFor.q[tk.key];
+  if (!GRADE_NAMES[grade]) return "";
+  const base = (model.presets[grade] && model.presets[grade][tk.kind]) || {};
+  const mine = ((optsFor.q.tune || {})[tk.kind] || {})[grade] || {};
+  const val = (k) => (mine[k] !== undefined && mine[k] !== null ? mine[k] : base[k]);
+  const rows = QUICK_TUNE[tk.kind].map((f) => {
+    const v = val(f.k);
+    if (f.toggle) return `<label class="opts-check"><input type="checkbox" data-tune="${f.k}"${v ? " checked" : ""}><span>${esc(f.label)}</span></label>`;
+    if (f.options) {
+      return `<label class="opts-field"><span>${esc(f.label)}</span><select data-tune="${f.k}">${f.options.map(([o, l]) => `<option value="${o}"${String(o) === String(v) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+    }
+    return `<label class="opts-field"><span class="row"><span>${esc(f.label)}</span><span class="val" data-tv="${f.k}">${v}</span></span>` +
+      `<input type="range" data-tune="${f.k}" min="${f.min}" max="${f.max}" step="${f.step}" value="${v}"></label>`;
+  }).join("");
+  return `<details class="opts-tune"${optsFor.tuneOpen ? " open" : ""}><summary>Tune ${GRADE_NAMES[grade]} for this conversion</summary><div class="opts-fields">${rows}</div></details>`;
+}
+
+function renderQuickTune() {
+  const old = optsFields.querySelector(".opts-tune");
+  if (old) old.remove();
+  optsFields.insertAdjacentHTML("beforeend", quickTuneHtml());
+}
+
+function setQuickTune(key, value) {
+  const tk = tuneKindOf(optsFor.slot.id);
+  const grade = optsFor.q[tk.key] === "high" ? "best" : optsFor.q[tk.key];
+  const q = optsFor.q;
+  q.tune = JSON.parse(JSON.stringify(q.tune || {}));
+  q.tune[tk.kind] = q.tune[tk.kind] || {};
+  q.tune[tk.kind][grade] = Object.assign({}, q.tune[tk.kind][grade], { [key]: value });
+}
+
 const optsEl = document.getElementById("opts");
 const optsFields = document.getElementById("opts-fields");
 const optsKeep = document.getElementById("opts-keep");
@@ -284,6 +340,7 @@ function showOptions(s) {
     return `<label class="opts-field"><span class="row"><span>${esc(f.label)}</span><span class="val" data-v="${key}">${q[key]}</span></span>` +
       `<input type="range" data-k="${key}" min="${f.min}" max="${f.max}" step="1" value="${q[key]}"></label>`;
   }).join("");
+  renderQuickTune();
   optsEl.hidden = false;
   document.body.classList.add("with-opts");
   hintEl.classList.remove("show");
@@ -317,12 +374,29 @@ function hideOptions() {
 if (optsEl) {
   optsFields.addEventListener("input", (e) => {
     if (optsFor && optsFor.ask && e.target.name === "askmode") { optsFor.mode = e.target.value; return; }
+    const tkey = e.target.dataset.tune;
+    if (tkey && optsFor) {
+      const raw = e.target.type === "checkbox" ? e.target.checked : e.target.type === "range" ? Number(e.target.value) : e.target.value;
+      setQuickTune(tkey, raw);
+      const tv = optsFields.querySelector(`[data-tv="${tkey}"]`);
+      if (tv) tv.textContent = raw;
+      return;
+    }
     const k = e.target.dataset.k;
     if (!k || !optsFor) return;
     const raw = e.target.value;
     optsFor.q[k] = typeof DEFAULT_Q[k] === "number" ? Number(raw) : raw;
     const v = optsFields.querySelector(`[data-v="${k}"]`);
     if (v) v.textContent = raw;
+    // Another preset: its own Tune values.
+    if (k === "video" || k === "image") {
+      const d = optsFields.querySelector(".opts-tune");
+      optsFor.tuneOpen = !!(d && d.open);
+      renderQuickTune();
+    }
+  });
+  optsFields.addEventListener("change", (e) => {
+    if (e.target.type === "checkbox" && e.target.dataset.tune && optsFor) setQuickTune(e.target.dataset.tune, e.target.checked);
   });
   optsEl.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -870,6 +944,7 @@ if (tauri) {
     files: [{ path: "C:\\Reports\\Q3-report.pdf", name: "Q3-report.pdf", ext: "pdf", family: "pdf", size: 2500000 }], skipped: [],
     hubTitle: "Q3-report.pdf", hubSubtitle: "PDF · 2.5 MB", hubFamily: "pdf", hubColor: "#C4262E",
     ring: true, handoffMs: 2000, quality: DEFAULT_Q,
+    presets: { balanced: { image: { look: 80, floor: 40, png: 1, stripGps: false }, video: { look: 93, encoder: "gpu" } }, small: { image: { look: 70, stripGps: false } }, best: { image: { look: 87, stripGps: false } } },
     ask: { default: "chat", modes: [
       { id: "chat", label: "Chat", does: "Starts a new chat with the file paths written in" },
       { id: "code", label: "Claude Code", does: "Opens a Claude Code session in the files' folder" },

@@ -154,6 +154,12 @@ fn mistakes_are_tool_errors_not_crashes() {
     assert_eq!(r["isError"], true);
     let r = m.call(5, "frobnicate", json!({}));
     assert_eq!(r["isError"], true);
+    // Preset changes: a typo is a tool error, a number is the look score.
+    let r = m.call(7, "convert", json!({ "paths": [png], "to": "jpg", "tune": { "encoder": "quantum" } }));
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("encoder"));
+    let r = m.call(8, "convert", json!({ "paths": [png], "to": "jpg", "quality": 75, "tune": { "stripGps": true, "floor": 50 } }));
+    assert_eq!(r["isError"], false, "{r}");
     // Still alive.
     assert_eq!(m.request(6, "ping", json!({}))["result"], json!({}));
 }

@@ -48,6 +48,11 @@ pub struct Probe {
 pub struct Opts {
     /// MP4, MOV and 720p when the video has to be re-encoded.
     quality: Quality,
+    /// Compress: the codec, the short side and frame rate at most (0: keep), AAC kbps.
+    codec: crate::tune::Codec,
+    max_res: u32,
+    max_fps: u32,
+    audio: u32,
     /// Search for the smallest file that still looks the same ("Pictures" in
     /// Settings is not "fixed").
     tune: bool,
@@ -63,13 +68,46 @@ impl Default for Opts {
 }
 
 impl Opts {
-    pub fn from_quality(q: &crate::settings::Quality) -> Self {
-        let quality = match q.video.as_str() {
-            "small" => Quality::Small,
-            "best" => Quality::Best,
-            _ => Quality::High,
+    /// The preset this job uses, as tuned (for the results line in Settings).
+    pub fn preset(&self) -> (crate::tune::Grade, crate::tune::Video) {
+        let g = match self.quality.tier {
+            Tier::Small => crate::tune::Grade::Small,
+            Tier::High => crate::tune::Grade::Balanced,
+            Tier::Best => crate::tune::Grade::Best,
         };
-        Opts { quality, tune: q.image != "fixed", gif_width: q.gif_width, gif_seconds: q.gif_seconds }
+        let q = self.quality;
+        let v = crate::tune::Video {
+            look: q.look,
+            codec: self.codec,
+            max_res: self.max_res,
+            max_fps: self.max_fps,
+            audio: self.audio,
+            encoder: q.encoder,
+            effort: q.effort,
+            recheck: q.recheck,
+        };
+        (g, v)
+    }
+
+    pub fn from_quality(q: &crate::settings::Quality) -> Self {
+        let grade = crate::tune::Grade::from_word(&q.video);
+        let v = q.tune.video(grade);
+        let tier = match grade {
+            crate::tune::Grade::Small => Tier::Small,
+            crate::tune::Grade::Best => Tier::Best,
+            crate::tune::Grade::Balanced => Tier::High,
+        };
+        let quality = Quality { tier, look: v.look, effort: v.effort, encoder: v.encoder, recheck: v.recheck, step: 1 };
+        Opts {
+            quality,
+            codec: v.codec,
+            max_res: v.max_res,
+            max_fps: v.max_fps,
+            audio: v.audio,
+            tune: q.image != "fixed",
+            gif_width: q.gif_width,
+            gif_seconds: q.gif_seconds,
+        }
     }
 }
 /// Frames: one per second, but never more than this many in all.
@@ -136,6 +174,7 @@ pub enum Codec {
     H264,
     Hevc,
     Vp9,
+    Av1,
 }
 
 impl Codec {
@@ -144,12 +183,14 @@ impl Codec {
             Codec::H264 => "h264",
             Codec::Hevc => "hevc",
             Codec::Vp9 => "vp9",
+            Codec::Av1 => "av1",
         }
     }
 }
 
+/// Which preset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Quality {
+enum Tier {
     /// As close to the source as practical; bigger files.
     Best,
     /// Visually close to the source ("Balanced").
@@ -158,13 +199,41 @@ enum Quality {
     Small,
 }
 
+/// A video preset as tuned (Settings › Quality › Tune; see tune.rs).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Quality {
+    tier: Tier,
+    /// VMAF score the result must reach.
+    look: f64,
+    /// Encoder effort: 0 faster, 1 medium, 2 slower.
+    effort: u8,
+    encoder: crate::tune::Encoder,
+    /// A trusted setting still gets a full check every Nth video.
+    recheck: u32,
+    /// Every n-th frame is kept (Compress's frame-rate limit); 1: all.
+    step: u32,
+}
+
+#[allow(non_upper_case_globals)]
 impl Quality {
-    fn level(self) -> crate::look::Level {
-        match self {
-            Quality::Best => crate::look::Level::Best,
-            Quality::High => crate::look::Level::Balanced,
-            Quality::Small => crate::look::Level::Small,
+    /// The presets as Convertino ships them.
+    #[cfg(test)]
+    const Best: Quality = Quality { tier: Tier::Best, look: 95.5, effort: 1, encoder: crate::tune::Encoder::Auto, recheck: 10, step: 1 };
+    const High: Quality = Quality { tier: Tier::High, look: 93.0, effort: 1, encoder: crate::tune::Encoder::Gpu, recheck: 10, step: 1 };
+    #[cfg(test)]
+    const Small: Quality = Quality { tier: Tier::Small, look: 89.0, effort: 1, encoder: crate::tune::Encoder::Gpu, recheck: 10, step: 1 };
+
+    fn pick<T>(self, best: T, high: T, small: T) -> T {
+        match self.tier {
+            Tier::Best => best,
+            Tier::High => high,
+            Tier::Small => small,
         }
+    }
+
+    /// By effort: faster, medium, slower.
+    fn by_effort<T: Copy>(self, v: [T; 3]) -> T {
+        v[self.effort.min(2) as usize]
     }
 }
 
@@ -173,6 +242,7 @@ fn candidates(codec: Codec) -> &'static [&'static str] {
         Codec::H264 => &["libx264", "h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox", "h264_mf", "libopenh264"],
         Codec::Hevc => &["libx265", "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_videotoolbox", "hevc_mf"],
         Codec::Vp9 => &["libvpx-vp9"],
+        Codec::Av1 => &["libsvtav1", "av1_nvenc"],
     }
 }
 
@@ -256,6 +326,8 @@ pub fn encoder_in_use() -> String {
         "h264_videotoolbox" | "hevc_videotoolbox" => "Apple VideoToolbox",
         "h264_mf" | "hevc_mf" => "Windows Media Foundation",
         "libopenh264" => "OpenH264 (software)",
+        "libsvtav1" => "SVT-AV1 (software)",
+        "av1_nvenc" => "NVIDIA graphics card (AV1)",
         other => other,
     }
     .to_string();
@@ -329,11 +401,7 @@ pub fn working(codec: Codec) -> Vec<&'static str> {
 fn bitrate(width: u32, height: u32, q: Quality) -> String {
     let pixels = (width.max(1) * height.max(1)) as f64;
     let full_hd = 1920.0 * 1080.0;
-    let mbps = match q {
-        Quality::Best => 12.0,
-        Quality::High => 8.0,
-        Quality::Small => 3.0,
-    } * (pixels / full_hd).powf(0.75);
+    let mbps = q.pick(12.0, 8.0, 3.0) * (pixels / full_hd).powf(0.75);
     format!("{}k", ((mbps * 1000.0) as u32).max(400))
 }
 
@@ -347,23 +415,22 @@ fn knob_range(enc: &str) -> Option<(u32, u32)> {
         "hevc_nvenc" => Some((18, 40)),
         "h264_qsv" | "hevc_qsv" | "h264_amf" | "hevc_amf" => Some((16, 38)),
         "libvpx-vp9" => Some((20, 48)),
+        "libsvtav1" | "av1_nvenc" => Some((20, 52)),
         _ => None,
     }
 }
 
 /// The value used without measuring, per level: Best, High (Balanced), Small.
 fn default_knob(enc: &str, q: Quality) -> u32 {
-    let pick = |best: u32, high: u32, small: u32| match q {
-        Quality::Best => best,
-        Quality::High => high,
-        Quality::Small => small,
-    };
+    let pick = |best: u32, high: u32, small: u32| q.pick(best, high, small);
     match enc {
         "libx264" => pick(18, 20, 26),
         "libx265" => pick(20, 22, 28),
         "h264_nvenc" => pick(19, 21, 28),
         "hevc_nvenc" => pick(22, 24, 31),
         "libvpx-vp9" => pick(28, 32, 38),
+        "libsvtav1" => pick(28, 32, 40),
+        "av1_nvenc" => pick(27, 31, 38),
         _ => pick(20, 22, 29),
     }
 }
@@ -376,21 +443,24 @@ fn encoder_args(enc: &str, q: Quality, width: u32, height: u32) -> Vec<String> {
 fn encoder_args_at(enc: &str, v: u32, q: Quality, width: u32, height: u32) -> Vec<String> {
     let v = v.to_string();
     let mut a = s(&["-c:v", enc]);
+    let x26x = q.by_effort(["fast", "medium", "slow"]);
+    let nv = q.by_effort(["p4", "p5", "p7"]);
     match enc {
-        "libx264" => a.extend(s(&["-preset", "medium", "-crf", &v, "-pix_fmt", "yuv420p"])),
-        "libx265" => a.extend(s(&["-preset", "medium", "-crf", &v, "-pix_fmt", "yuv420p", "-x265-params", "log-level=error"])),
-        "h264_nvenc" | "hevc_nvenc" => {
-            a.extend(s(&["-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", &v, "-b:v", "0", "-spatial-aq", "1", "-pix_fmt", "yuv420p"]));
+        "libx264" => a.extend(s(&["-preset", x26x, "-crf", &v, "-pix_fmt", "yuv420p"])),
+        "libx265" => a.extend(s(&["-preset", x26x, "-crf", &v, "-pix_fmt", "yuv420p", "-x265-params", "log-level=error"])),
+        "h264_nvenc" | "hevc_nvenc" | "av1_nvenc" => {
+            a.extend(s(&["-preset", nv, "-tune", "hq", "-rc", "vbr", "-cq", &v, "-b:v", "0", "-spatial-aq", "1", "-pix_fmt", "yuv420p"]));
         }
-        "h264_qsv" | "hevc_qsv" => a.extend(s(&["-preset", "medium", "-global_quality", &v, "-pix_fmt", "nv12"])),
+        "libsvtav1" => a.extend(s(&["-preset", q.by_effort(["10", "8", "6"]), "-crf", &v, "-pix_fmt", "yuv420p"])),
+        "h264_qsv" | "hevc_qsv" => a.extend(s(&["-preset", q.by_effort(["faster", "medium", "slower"]), "-global_quality", &v, "-pix_fmt", "nv12"])),
         "h264_amf" | "hevc_amf" => {
-            a.extend(s(&["-quality", "balanced", "-rc", "cqp", "-qp_i", &v, "-qp_p", &v, "-pix_fmt", "yuv420p"]));
+            a.extend(s(&["-quality", q.by_effort(["speed", "balanced", "quality"]), "-rc", "cqp", "-qp_i", &v, "-qp_p", &v, "-pix_fmt", "yuv420p"]));
             if enc == "h264_amf" {
                 a.extend(s(&["-qp_b", &v]));
             }
         }
         "libvpx-vp9" => a.extend(s(&[
-            "-crf", &v, "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-pix_fmt", "yuv420p",
+            "-crf", &v, "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", q.by_effort(["5", "4", "2"]), "-pix_fmt", "yuv420p",
         ])),
         // VideoToolbox, Media Foundation (built into Windows) and OpenH264: bitrate only.
         _ => a.extend(s(&["-b:v", &bitrate(width, height, q), "-pix_fmt", "yuv420p"])),
@@ -414,7 +484,8 @@ fn video_encode(codec: Codec, q: Quality, p: &Probe, tuned: Option<&Tuned>) -> R
         return Ok(encoder_args_at(t.encoder, t.value, q, p.width, p.height));
     }
     let enc = encoder(codec)
-        .or_else(|| if codec == Codec::Hevc { encoder(Codec::H264) } else { None })
+        .or_else(|| if codec == Codec::Av1 { encoder(Codec::Hevc) } else { None })
+        .or_else(|| if matches!(codec, Codec::Hevc | Codec::Av1) { encoder(Codec::H264) } else { None })
         .ok_or("This FFmpeg has no working H.264 encoder.")?;
     Ok(encoder_args(enc, q, p.width, p.height))
 }
@@ -443,16 +514,55 @@ pub fn args_for(job: Job, p: &Probe, opts: &Opts) -> Result<Vec<String>, String>
 
 /// The video encode a job needs (codec, and the height it scales to), or None
 /// when it copies streams or isn't an ordinary encode (GIF, frames, MKV).
-fn encode_of(job: Job, p: &Probe) -> Option<(Codec, Option<u32>)> {
+fn encode_of(job: Job, p: &Probe, opts: &Opts) -> Option<(Codec, Option<u32>)> {
     let v = p.video.as_deref()?;
     match job {
         Job::Mp4 if !MP4_VIDEO.contains(&v) => Some((Codec::H264, None)),
         Job::Mov if !MOV_VIDEO.contains(&v) => Some((Codec::H264, None)),
         Job::Webm if !WEBM_VIDEO.contains(&v) => Some((Codec::Vp9, None)),
-        Job::Compress => Some((Codec::Hevc, None)),
+        Job::Compress => Some((compress_codec(opts), cap_height(p, opts.max_res))),
         Job::To720p if p.height > 720 => Some((Codec::H264, Some(720))),
         _ => None,
     }
+}
+
+/// Compress's codec from the preset.
+fn compress_codec(opts: &Opts) -> Codec {
+    match opts.codec {
+        crate::tune::Codec::H265 => Codec::Hevc,
+        crate::tune::Codec::H264 => Codec::H264,
+        crate::tune::Codec::Av1 => Codec::Av1,
+    }
+}
+
+/// The height to scale to so the short side is at most `max` (0: keep), or
+/// None when the video is already that small.
+fn cap_height(p: &Probe, max: u32) -> Option<u32> {
+    let short = p.width.min(p.height);
+    if max == 0 || short == 0 || short <= max {
+        return None;
+    }
+    if p.height <= p.width {
+        Some(max)
+    } else {
+        // Portrait: the width is the short side.
+        Some(((p.height as u64 * max as u64 / p.width as u64) as u32 + 1) & !1)
+    }
+}
+
+/// Keep every n-th frame so the frame rate is at most `max` (0: keep). An
+/// even split (144 → 48, 120 → 60) keeps the motion smooth. Frame rates
+/// FFmpeg reports implausibly (some captures say 1000) are left alone.
+fn fps_step(p: &Probe, max: u32) -> u32 {
+    match p.fps {
+        Some(f) if max > 0 && f > 1.0 && f <= 400.0 && f > max as f64 * 1.05 => (f / max as f64).ceil() as u32,
+        _ => 1,
+    }
+}
+
+/// The frame filter for `step` (every n-th frame from the first).
+fn select_filter(step: u32) -> String {
+    format!("select=not(mod(n\\,{step}))")
 }
 
 fn args_with(job: Job, p: &Probe, opts: &Opts, tuned: Option<&Tuned>) -> Result<Vec<String>, String> {
@@ -499,12 +609,32 @@ fn args_with(job: Job, p: &Probe, opts: &Opts, tuned: Option<&Tuned>) -> Result<
             a.extend(s(&["-vf", &filter, "-loop", "0", "-an"]));
         }
         Job::Compress => {
-            a.extend(video_encode(Codec::Hevc, opts.quality, p, tuned)?);
+            // The preset's limits: a smaller picture, fewer frames.
+            let scale_to = cap_height(p, opts.max_res);
+            let step = fps_step(p, opts.max_fps);
+            let mut vf = Vec::new();
+            let mut shown = p.clone();
+            if let Some(h) = scale_to {
+                vf.push(format!("scale=-2:{h}:flags=lanczos"));
+                shown.width = p.width * h / p.height.max(1);
+                shown.height = h;
+            }
+            if step > 1 {
+                vf.push(select_filter(step));
+            }
+            if !vf.is_empty() {
+                a.extend(s(&["-vf", &vf.join(",")]));
+            }
+            if step > 1 {
+                a.extend(s(&["-fps_mode", "vfr"]));
+            }
+            a.extend(video_encode(compress_codec(opts), opts.quality, &shown, tuned)?);
             // Already-small AAC is kept as it is: re-encoding it only loses quality.
+            let kbps = opts.audio;
             match (p.audio.as_deref(), p.audio_kbps) {
                 (None, _) => a.extend(s(&["-an"])),
-                (Some("aac"), Some(k)) if k <= 160 => a.extend(s(&["-c:a", "copy"])),
-                _ => a.extend(aac("128")),
+                (Some("aac"), Some(k)) if k <= kbps + kbps / 4 => a.extend(s(&["-c:a", "copy"])),
+                _ => a.extend(aac(&kbps.to_string())),
             }
             a.extend(s(&["-movflags", "+faststart"]));
         }
@@ -599,9 +729,14 @@ fn sample_spans(duration: Option<f64>) -> Vec<(f64, f64)> {
 /// files' own timestamps paired the wrong frames on recordings with uneven
 /// frame timing (game captures): a near-lossless encode scored ~74 instead of
 /// ~97, every setting "failed", and Compress fell back to its biggest output.
-fn compare_filter(scale_to: Option<u32>, height: u32) -> String {
+fn compare_filter(scale_to: Option<u32>, height: u32, step: u32) -> String {
     let h = scale_to.unwrap_or(height).max(2);
     let mut f = String::new();
+    // The source side of a frame-rate-limited sample: the same frames it kept.
+    if step > 1 {
+        f.push_str(&select_filter(step));
+        f.push(',');
+    }
     if let Some(h) = scale_to {
         f.push_str(&format!("scale=-2:{h}:flags=lanczos,"));
     }
@@ -642,8 +777,15 @@ fn trial(input: &Path, p: &Probe, enc: &'static str, value: u32, q: Quality, sca
         cmd.args(["-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-ss", &format!("{start:.3}"), "-t", &format!("{len:.3}"), "-i"])
             .arg(input)
             .args(["-map", "0:v:0", "-an"]);
+        let mut vf = Vec::new();
         if let Some(sh) = scale_to {
-            cmd.args(["-vf", &format!("scale=-2:{sh}:flags=lanczos")]);
+            vf.push(format!("scale=-2:{sh}:flags=lanczos"));
+        }
+        if q.step > 1 {
+            vf.push(select_filter(q.step));
+        }
+        if !vf.is_empty() {
+            cmd.args(["-vf", &vf.join(",")]);
         }
         // Every source frame, untouched in timing (no frames added or dropped to
         // even out the frame rate), so the sample lines up frame for frame.
@@ -654,8 +796,8 @@ fn trial(input: &Path, p: &Probe, enc: &'static str, value: u32, q: Quality, sca
         bytes += out.metadata().map(|m| m.len()).unwrap_or(0);
 
         let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-        let norm_d = compare_filter(None, h);
-        let norm_r = compare_filter(scale_to, p.height);
+        let norm_d = compare_filter(None, h, 1);
+        let norm_r = compare_filter(scale_to, p.height, q.step);
         let measure = match metric() {
             Metric::Vmaf => format!("libvmaf=n_threads={threads}:n_subsample=2"),
             Metric::Ssim => "ssim".to_string(),
@@ -796,24 +938,24 @@ fn look_path() -> Option<PathBuf> {
 fn look_key(enc: &str, q: Quality, input: &Path, p: &Probe, scale_to: Option<u32>) -> String {
     let h = scale_to.unwrap_or(p.height);
     let w = if p.height > 0 { p.width * h / p.height } else { p.width };
-    let fps = p.fps.unwrap_or(0.0).round() as u32;
+    let fps = (p.fps.unwrap_or(0.0) / q.step.max(1) as f64).round() as u32;
     // Source bitrate in rough steps (doubling), from size and length.
     let mbps = match (input.metadata().map(|m| m.len()).ok(), p.duration) {
         (Some(b), Some(d)) if d > 0.0 => b as f64 * 8.0 / d / 1e6,
         _ => 0.0,
     };
     let step = if mbps > 0.0 { (mbps.log2() * 2.0).round() as i32 } else { -99 };
-    format!("{enc}|{q:?}|{w}x{h}|{fps}|{}|{step}", p.video.as_deref().unwrap_or("?")).to_lowercase()
+    // The tuned look and effort are part of the kind: changing them measures again.
+    let tuned = if q.look == q.pick(95.5, 93.0, 89.0) && q.effort == 1 { String::new() } else { format!("@{}e{}", q.look, q.effort) };
+    format!("{enc}|{:?}{tuned}|{w}x{h}|{fps}|{}|{step}", q.tier, p.video.as_deref().unwrap_or("?")).to_lowercase()
 }
 
 // Once the same setting has won TRUST_AFTER full checks in a row for a kind of
-// video, Compress uses it without measuring; every CHECK_EVERY-th video of that
+// video, Compress uses it without measuring; every Nth video of that (the preset's "Full look check every", 10 by default)
 // kind is measured again (a spot check), and any change starts the count over.
 
 /// Full checks in a row that must agree before a setting is used unmeasured.
 const TRUST_AFTER: u64 = 3;
-/// One video in this many of a trusted kind is still measured.
-const CHECK_EVERY: u64 = 10;
 
 /// One kind of video in video-look.json.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -876,9 +1018,9 @@ fn look_keep(key: &str, value: u32, ratio: f64) {
 
 /// The trusted setting for this kind of video, if this video may skip the
 /// check (counted as used); None when it must be measured.
-fn look_trusted(key: &str) -> Option<Remembered> {
+fn look_trusted(key: &str, every: u64) -> Option<Remembered> {
     let r = look_entry(&look_all(), key)?;
-    if !trusted_skip(&r) {
+    if !trusted_skip(&r, every) {
         return None;
     }
     let used = Remembered { since: r.since + 1, ..r };
@@ -887,8 +1029,9 @@ fn look_trusted(key: &str) -> Option<Remembered> {
 }
 
 /// Confirmed often enough, and not the video due for a spot check.
-fn trusted_skip(r: &Remembered) -> bool {
-    r.confirmed >= TRUST_AFTER && r.since + 1 < CHECK_EVERY && r.ratio > 0.0
+/// `every`: one video in this many of a trusted kind is still measured (the preset's "Full look check every").
+fn trusted_skip(r: &Remembered, every: u64) -> bool {
+    r.confirmed >= TRUST_AFTER && r.since + 1 < every && r.ratio > 0.0
 }
 
 /// Size of the whole result next to the source, from the samples' size.
@@ -959,7 +1102,7 @@ fn remember(key: &str, encoder: &str, uses: u64) {
 /// same look, the card is much faster. The card wins unless the software
 /// result is clearly smaller (and not unbearably slow).
 fn prefer_hardware(sw: &Trial, hw: &Trial, duration: f64, sampled: f64, q: Quality) -> bool {
-    let margin = if q == Quality::Best { 1.08 } else { 1.15 };
+    let margin = q.pick(1.08, 1.15, 1.15);
     if hw.bytes as f64 <= sw.bytes as f64 * margin {
         return true;
     }
@@ -974,18 +1117,29 @@ fn prefer_hardware(sw: &Trial, hw: &Trial, duration: f64, sampled: f64, q: Quali
 /// measuring (Compress); size planning (compress to a size) always measures.
 fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>, trust: bool, progress: &mut dyn FnMut(f64)) -> Result<Option<(Tuned, f64)>, String> {
     let mut list = working(codec);
-    if list.is_empty() && codec == Codec::Hevc {
+    if list.is_empty() && codec == Codec::Av1 {
+        list = working(Codec::Hevc);
+    }
+    if list.is_empty() && matches!(codec, Codec::Hevc | Codec::Av1) {
         list = working(Codec::H264);
     }
     let list: Vec<&'static str> = list.into_iter().filter(|e| knob_range(e).is_some()).collect();
     let Some(&first) = list.first() else { return Ok(None) };
     let started = std::time::Instant::now();
     let hardware = list.iter().copied().find(|e| !is_software(e));
-    // The encoder search_kind would measure (not for "Best", which compares two).
-    if trust && q != Quality::Best {
-        let enc = hardware.unwrap_or(first);
-        if let Some(r) = look_trusted(&look_key(enc, q, input, p, scale_to)) {
-            let left = CHECK_EVERY - 1 - r.since;
+    let software = list.iter().copied().find(|e| is_software(e));
+    // The preset's "Encode on": the graphics card (many times faster), the
+    // processor (smaller files at the same look), or Auto (both measured now
+    // and then, the better one kept).
+    let only = match q.encoder {
+        crate::tune::Encoder::Gpu => Some(hardware.unwrap_or(first)),
+        crate::tune::Encoder::Cpu => Some(software.unwrap_or(first)),
+        crate::tune::Encoder::Auto => None,
+    };
+    let every = q.recheck.max(1) as u64;
+    if let (true, Some(enc)) = (trust, only) {
+        if let Some(r) = look_trusted(&look_key(enc, q, input, p, scale_to), every) {
+            let left = every - 1 - r.since;
             log::info!(
                 "video look: {enc} at {} without measuring (chosen {} times in a row; {})",
                 r.value,
@@ -996,19 +1150,19 @@ fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>
             return Ok(Some((Tuned { encoder: enc, value: r.value }, r.ratio)));
         }
     }
-    let target = q.level().vmaf_target();
+    let target = q.look;
     let spans = sample_spans(p.duration);
     let sampled: f64 = spans.iter().map(|s| s.1).sum();
     let duration = p.duration.unwrap_or(sampled);
     let tmp = crate::convert::TempDir::new("vlook")?;
     let size_key = if scale_to.unwrap_or(p.height) > 1080 { "large" } else { "hd" };
-    let key = format!("{}-{size_key}-{:?}", codec.key(), q).to_lowercase();
+    let key = format!("{}-{size_key}-{:?}{}", codec.key(), q.tier, if q.look == q.pick(95.5, 93.0, 89.0) { String::new() } else { format!("@{}", q.look) }).to_lowercase();
 
     let chosen = match hardware {
-        // "Balanced" and "Smaller": the graphics card, which is many times faster;
-        // its setting is still chosen by how the result looks.
-        Some(hw) if q != Quality::Best => search_kind(input, p, hw, q, target, scale_to, &spans, &tmp.0, progress)?,
-        // "Best": software and card are both measured (now and then) and the better one kept.
+        // Graphics card or processor, as the preset says; the setting is
+        // still chosen by how the result looks.
+        _ if only.is_some() => search_kind(input, p, only.unwrap_or(first), q, target, scale_to, &spans, &tmp.0, progress)?,
+        // Auto: software and card are both measured (now and then) and the better one kept.
         Some(hw) if hw != first && is_software(first) => match remembered(&key) {
             Some((enc, uses)) if uses < RECHECK_AFTER && list.iter().any(|e| *e == enc) => {
                 let enc = list.iter().copied().find(|e| *e == enc).unwrap_or(first);
@@ -1036,6 +1190,74 @@ fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>
     let source_bytes = input.metadata().map(|m| m.len()).unwrap_or(0) as f64;
     let ratio = if duration > 0.0 && source_bytes > 0.0 { chosen.bytes as f64 / (source_bytes * sampled.min(duration) / duration) } else { 0.0 };
     Ok(Some((Tuned { encoder: chosen.encoder, value: chosen.value }, ratio)))
+}
+
+/// What "Test on a file" found for a video (Settings › Quality › Tune).
+pub struct Test {
+    pub encoder: &'static str,
+    pub value: u32,
+    /// The whole video's size next to the source, from the samples.
+    pub ratio: f64,
+    /// The look score of a sample at the chosen setting.
+    pub score: f64,
+    pub target: f64,
+    /// About how long Compress would take, in seconds.
+    pub estimate: f64,
+    /// A short clip at the chosen setting, and where it starts in the source (for Compare).
+    pub clip: PathBuf,
+    pub clip_start: f64,
+}
+
+/// Measures Compress with `opts` on `input`'s samples (nothing is saved next
+/// to it) and writes a short clip at the chosen setting into `dir`.
+pub fn test_compress(input: &Path, opts: &Opts, dir: &Path, progress: &mut dyn FnMut(f64)) -> Result<Test, String> {
+    let p = probe(input)?;
+    if p.video.is_none() {
+        return Err("This file has no video in it.".into());
+    }
+    let Some((codec, scale_to)) = encode_of(Job::Compress, &p, opts) else { return Err("This video can't be compressed.".into()) };
+    let mut q = opts.quality;
+    q.step = fps_step(&p, opts.max_fps);
+    let started = std::time::Instant::now();
+    let (t, ratio) = tune(input, &p, codec, q, scale_to, false, &mut |f| progress(f * 0.7))?
+        .ok_or("There's no encoder here that can be measured (only bitrate encoders).")?;
+    let measured = started.elapsed().as_secs_f64();
+    let d = p.duration.unwrap_or(4.0);
+    let (start, len) = if d > 6.0 { (d / 2.0 - 2.0, 4.0) } else { (0.0, d.max(0.5)) };
+    let check = trial(input, &p, t.encoder, t.value, q, scale_to, &[(start, len)], dir)?;
+    progress(0.85);
+    let ff = tools::require(Tool::Ffmpeg)?;
+    let clip = dir.join("sample.mp4");
+    let _ = std::fs::remove_file(&clip);
+    let (w, h) = match scale_to {
+        Some(sh) => (p.width * sh / p.height.max(1), sh),
+        None => (p.width, p.height),
+    };
+    let mut cmd = tools::command(&ff);
+    cmd.args(["-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-ss", &format!("{start:.3}"), "-t", &format!("{len:.3}"), "-i"])
+        .arg(input)
+        .args(["-map", "0:v:0", "-an"]);
+    let mut vf = Vec::new();
+    if let Some(sh) = scale_to {
+        vf.push(format!("scale=-2:{sh}:flags=lanczos"));
+    }
+    if q.step > 1 {
+        vf.push(select_filter(q.step));
+    }
+    if !vf.is_empty() {
+        cmd.args(["-vf", &vf.join(",")]);
+    }
+    cmd.args(encoder_args_at(t.encoder, t.value, q, w, h)).args(["-fps_mode", "passthrough"]).arg(&clip);
+    crate::convert::exec(Tool::Ffmpeg, cmd)?;
+    progress(1.0);
+    // Encoding speed from the check, for the whole video, plus the measuring.
+    let estimate = check.secs / len.max(0.1) * d + measured;
+    Ok(Test { encoder: t.encoder, value: t.value, ratio, score: check.score, target: q.look, estimate, clip, clip_start: start })
+}
+
+/// Whether Compress can make AV1 here (Settings greys the choice out otherwise).
+pub fn av1_available() -> bool {
+    tools::find(Tool::Ffmpeg).is_some() && !working(Codec::Av1).is_empty()
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,14 +1294,14 @@ fn last_frame_count(text: &str) -> Option<u64> {
 }
 
 /// Encoder settings for an average bitrate (`kbps`), peaks capped.
-fn bitrate_args(enc: &str, kbps: u32) -> Vec<String> {
+fn bitrate_args(enc: &str, kbps: u32, q: Quality) -> Vec<String> {
     let (b, max, buf) = (format!("{kbps}k"), format!("{}k", kbps * 3 / 2), format!("{}k", kbps * 2));
     let mut a = s(&["-c:v", enc]);
     match enc {
-        "h264_nvenc" | "hevc_nvenc" => a.extend(s(&["-preset", "p5", "-tune", "hq", "-rc", "vbr", "-multipass", "fullres", "-spatial-aq", "1"])),
-        "h264_qsv" | "hevc_qsv" => a.extend(s(&["-preset", "medium"])),
-        "h264_amf" | "hevc_amf" => a.extend(s(&["-quality", "balanced", "-rc", "vbr_peak"])),
-        "libx264" | "libx265" => a.extend(s(&["-preset", "medium"])),
+        "h264_nvenc" | "hevc_nvenc" => a.extend(s(&["-preset", q.by_effort(["p4", "p5", "p7"]), "-tune", "hq", "-rc", "vbr", "-multipass", "fullres", "-spatial-aq", "1"])),
+        "h264_qsv" | "hevc_qsv" => a.extend(s(&["-preset", q.by_effort(["faster", "medium", "slower"])])),
+        "h264_amf" | "hevc_amf" => a.extend(s(&["-quality", q.by_effort(["speed", "balanced", "quality"]), "-rc", "vbr_peak"])),
+        "libx264" | "libx265" => a.extend(s(&["-preset", q.by_effort(["fast", "medium", "slow"])])),
         _ => {}
     }
     a.extend(s(&["-b:v", &b, "-maxrate", &max, "-bufsize", &buf, "-pix_fmt", if enc.ends_with("_qsv") { "nv12" } else { "yuv420p" }]));
@@ -1097,6 +1319,7 @@ pub fn run_to_size(
     plan: &crate::size::VideoPlan,
     target: u64,
     trim: Option<f64>,
+    opts: &Opts,
     output: &Path,
     progress: &mut dyn FnMut(f64),
 ) -> Result<(), String> {
@@ -1106,7 +1329,8 @@ pub fn run_to_size(
     }
     let mut share = 0.0;
     if plan.quality_mode {
-        let opts = Opts::from_quality(&crate::settings::get().quality);
+        // The size plan decides picture size, frame rate and codec here.
+        let opts = Opts { codec: crate::tune::Codec::H265, max_res: 0, max_fps: 0, ..*opts };
         share = 0.2;
         match tune(input, &p, Codec::Hevc, opts.quality, None, false, &mut |f| progress(f * 0.2)) {
             Ok(Some((t, ratio))) if ratio * info.bytes as f64 <= target as f64 * 0.9 => {
@@ -1173,7 +1397,7 @@ pub fn run_to_size(
         let tmp = crate::convert::TempDir::new("x265")?;
         let rate = format!("{}k", plan.video_kbps);
         let x265 = |pass: u32| {
-            s(&["-c:v", "libx265", "-preset", "medium", "-b:v", &rate, "-pix_fmt", "yuv420p", "-x265-params", &format!("pass={pass}:stats=x265.log:log-level=error")])
+            s(&["-c:v", "libx265", "-preset", opts.quality.by_effort(["fast", "medium", "slow"]), "-b:v", &rate, "-pix_fmt", "yuv420p", "-x265-params", &format!("pass={pass}:stats=x265.log:log-level=error")])
         };
         let first = [base.clone(), x265(1), s(&["-an", "-f", "null"])].concat();
         let mid = share + (1.0 - share) * 0.4;
@@ -1181,7 +1405,7 @@ pub fn run_to_size(
         let second = [base, x265(2), tail].concat();
         return crate::convert::run_ffmpeg_in(Some(&tmp.0), input, &second, output, &mut |f| progress(mid + (1.0 - mid) * f));
     }
-    let args = [base, bitrate_args(enc, plan.video_kbps), tail].concat();
+    let args = [base, bitrate_args(enc, plan.video_kbps, opts.quality), tail].concat();
     run_ffmpeg(input, &args, output, &mut |f| progress(share + (1.0 - share) * f))
 }
 
@@ -1193,9 +1417,13 @@ pub fn run(input: &Path, job: Job, opts: &Opts, output: &Path, progress: &mut dy
     // Measure first (about a fifth of the time), then encode the whole video.
     let mut tuned = None;
     let mut share = 0.0;
-    if let (true, Some((codec, scale_to))) = (opts.tune, encode_of(job, &p)) {
+    if let (true, Some((codec, scale_to))) = (opts.tune, encode_of(job, &p, opts)) {
         share = 0.2;
-        match tune(input, &p, codec, opts.quality, scale_to, job == Job::Compress, &mut |f| progress(f * 0.2)) {
+        let mut q = opts.quality;
+        if job == Job::Compress {
+            q.step = fps_step(&p, opts.max_fps);
+        }
+        match tune(input, &p, codec, q, scale_to, job == Job::Compress, &mut |f| progress(f * 0.2)) {
             Ok(Some((t, ratio))) => {
                 log::info!("video {job:?}: {} at {}, about {:.0}% of the source", t.encoder, t.value, ratio * 100.0);
                 if job == Job::Compress && ratio > 0.9 {
@@ -1345,7 +1573,7 @@ mod look_tests {
         println!("tuned: {t:?}, about {:.0}% of the source", ratio * 100.0);
         let tmp = crate::convert::TempDir::new("vlook-check").unwrap();
         let check = trial(&src, &p, t.encoder, t.value, Quality::High, None, &sample_spans(p.duration), &tmp.0).unwrap();
-        assert!(check.score >= Quality::High.level().vmaf_target(), "{}", check.score);
+        assert!(check.score >= Quality::High.look, "{}", check.score);
         assert!(ratio < 0.6, "{ratio}");
         assert!(t.value > default_knob(t.encoder, Quality::Small) - 8);
     }
@@ -1380,14 +1608,16 @@ mod look_tests {
     #[test]
     fn trusted_settings_get_spot_checks() {
         let r = |confirmed, since| Remembered { value: 30, confirmed, since, ratio: 0.3 };
-        assert!(!trusted_skip(&r(2, 0)), "two checks aren't enough");
-        assert!(trusted_skip(&r(3, 0)));
+        const CHECK_EVERY: u64 = 10;
+        assert!(!trusted_skip(&r(2, 0), CHECK_EVERY), "two checks aren't enough");
+        assert!(trusted_skip(&r(3, 0), CHECK_EVERY));
+        assert!(!trusted_skip(&r(9, 0), 1), "every video measured");
         // Videos 1–9 after a full check skip it, the 10th is measured.
-        let skipped = (0..CHECK_EVERY).filter(|&since| trusted_skip(&r(3, since))).count() as u64;
+        let skipped = (0..CHECK_EVERY).filter(|&since| trusted_skip(&r(3, since), CHECK_EVERY)).count() as u64;
         assert_eq!(skipped, CHECK_EVERY - 1);
-        assert!(!trusted_skip(&r(5, CHECK_EVERY - 1)));
+        assert!(!trusted_skip(&r(5, CHECK_EVERY - 1), CHECK_EVERY));
         // No size estimate yet (entry from the first version): measure.
-        assert!(!trusted_skip(&Remembered { ratio: 0.0, ..r(5, 0) }));
+        assert!(!trusted_skip(&Remembered { ratio: 0.0, ..r(5, 0) }, CHECK_EVERY));
         let old = serde_json::json!({ "k": 33 });
         assert_eq!(look_entry(&old, "k"), Some(Remembered { value: 33, confirmed: 1, since: 0, ratio: 0.0 }));
     }
@@ -1399,5 +1629,95 @@ mod look_tests {
         assert!((ssim - 92.0).abs() < 0.01);
         assert_eq!(sample_spans(Some(10.0)), vec![(3.0, 4.0)]);
         assert_eq!(sample_spans(Some(100.0)).len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod tune_tests {
+    use super::*;
+
+    fn tuned(list: &str, grade: &str) -> Opts {
+        let mut q = crate::settings::Quality { video: grade.into(), ..Default::default() };
+        q.tune.apply_list(crate::tune::Grade::from_word(grade), list).unwrap();
+        Opts::from_quality(&q)
+    }
+
+    #[test]
+    fn limits_and_steps() {
+        let p = |w: u32, h: u32, fps: f64| Probe { width: w, height: h, fps: Some(fps), ..Default::default() };
+        assert_eq!(cap_height(&p(2560, 1440, 60.0), 1080), Some(1080));
+        assert_eq!(cap_height(&p(1920, 1080, 60.0), 1080), None);
+        assert_eq!(cap_height(&p(1080, 1920, 30.0), 720), Some(1280), "portrait: the width is the short side");
+        assert_eq!(cap_height(&p(2560, 1440, 60.0), 0), None);
+        assert_eq!(fps_step(&p(1, 1, 144.0), 60), 3);
+        assert_eq!(fps_step(&p(1, 1, 120.0), 60), 2);
+        assert_eq!(fps_step(&p(1, 1, 60.0), 60), 1);
+        assert_eq!(fps_step(&p(1, 1, 59.94), 30), 2);
+        assert_eq!(fps_step(&p(1, 1, 1000.0), 60), 1, "implausible rates are left alone");
+        assert_eq!(fps_step(&p(1, 1, 144.0), 0), 1);
+        // Smaller limits game recordings by default; Balanced keeps them.
+        let small = Opts::from_quality(&crate::settings::Quality { video: "small".into(), ..Default::default() });
+        assert_eq!((small.max_res, small.max_fps), (1080, 60));
+        assert_eq!((Opts::default().max_res, Opts::default().max_fps), (0, 0));
+    }
+
+    #[test]
+    fn tuned_compress_arguments() {
+        if tools::find(Tool::Ffmpeg).is_none() || encoder(Codec::H264) != Some("libx264") {
+            return;
+        }
+        let p = Probe { video: Some("h264".into()), audio: Some("aac".into()), width: 2560, height: 1440, duration: Some(60.0), audio_kbps: Some(192), fps: Some(144.0) };
+        let o = tuned("max-res=1080, max-fps=60, audio=96, codec=h264, effort=slower", "balanced");
+        let a = args_for(Job::Compress, &p, &o).unwrap().join(" ");
+        assert!(a.contains("scale=-2:1080:flags=lanczos,select=not(mod(n\\,3))"), "{a}");
+        assert!(a.contains("-fps_mode vfr") && a.contains("-c:v libx264 -preset slow") && a.contains("-b:a 96k"), "{a}");
+        // The usual Compress: H.265, AAC at 128 copied when already small.
+        let d = args_for(Job::Compress, &Probe { audio_kbps: Some(128), ..p.clone() }, &Opts::default()).unwrap().join(" ");
+        assert!(!d.contains("scale=") && !d.contains("select") && d.contains("-c:a copy") && d.contains("medium"), "{d}");
+        assert!(tune_word_free(&d), "{d}");
+    }
+
+    fn tune_word_free(args: &str) -> bool {
+        !args.contains("p7") && !args.contains("slow")
+    }
+
+    /// A 60 fps clip at 960 lines, Compress limited to 720p and 30 fps: the
+    /// samples are measured on the same frames (so the look check passes) and
+    /// the result comes out at 720p, 30 fps.
+    #[test]
+    fn real_compress_with_limits() {
+        let Some(ff) = tools::find(Tool::Ffmpeg) else { return };
+        if working(Codec::Hevc).is_empty() && working(Codec::H264).is_empty() {
+            return;
+        }
+        let d = std::env::temp_dir().join(format!("convertino-vtune-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let src = d.join("game.mp4");
+        assert!(tools::command(&ff)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1280x960:rate=60:duration=5"])
+            .args(["-vf", "noise=alls=6:allf=t", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10"])
+            .arg(&src)
+            .status()
+            .unwrap()
+            .success());
+        let o = tuned("max-res=720, max-fps=30, encoder=cpu, effort=faster, recheck=1", "balanced");
+        let out = d.join("game (compressed).mp4");
+        run(&src, Job::Compress, &o, &out, &mut |_| {}).unwrap();
+        let r = probe(&out).unwrap();
+        assert_eq!((r.width, r.height), (960, 720));
+        let fps = r.fps.unwrap_or(0.0);
+        assert!((fps - 30.0).abs() < 1.5, "{fps}");
+        assert!(out.metadata().unwrap().len() < src.metadata().unwrap().len() / 2);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn av1_when_there_is_an_encoder() {
+        if tools::find(Tool::Ffmpeg).is_none() || working(Codec::Av1).is_empty() {
+            return;
+        }
+        let p = Probe { video: Some("h264".into()), audio: None, width: 1280, height: 720, duration: Some(10.0), audio_kbps: None, fps: Some(30.0) };
+        let a = args_for(Job::Compress, &p, &tuned("codec=av1", "balanced")).unwrap().join(" ");
+        assert!(a.contains("-c:v libsvtav1") || a.contains("-c:v av1_nvenc"), "{a}");
     }
 }

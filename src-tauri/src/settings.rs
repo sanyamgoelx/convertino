@@ -35,6 +35,8 @@ pub struct Quality {
     /// "small", "balanced" or "best" finds the smallest file that still looks
     /// that good; "fixed" uses the JPG/WebP numbers above as they are.
     pub image: String,
+    /// What was changed behind each preset (Settings › Quality › Tune).
+    pub tune: crate::tune::Tunes,
 }
 
 impl Default for Quality {
@@ -51,6 +53,7 @@ impl Default for Quality {
             gif_width: 480,
             gif_seconds: 30,
             image: "balanced".into(),
+            tune: crate::tune::Tunes::default(),
         }
     }
 }
@@ -79,7 +82,18 @@ impl Quality {
         if !["small", "balanced", "best", "fixed"].contains(&self.image.as_str()) {
             self.image = d.image;
         }
+        self.tune = self.tune.clamped();
         self
+    }
+
+    /// The picture preset in use, tuned; None for "fixed".
+    pub fn image_level(&self) -> Option<crate::look::Level> {
+        (self.image != "fixed").then(|| crate::look::Level::image(self, crate::tune::Grade::from_word(&self.image)))
+    }
+
+    /// The PDF Compress preset in use, tuned.
+    pub fn pdf_level(&self) -> crate::look::Level {
+        crate::look::Level::pdf(self, crate::tune::Grade::from_word(&self.pdf_compress))
     }
 }
 

@@ -7,7 +7,7 @@
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$log = Join-Path $root 'setup.log'
+$log = Join-Path $root 'logs\setup.log'
 Start-Transcript -Path $log -Append | Out-Null
 
 function Step($msg) { Write-Host ''; Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -115,7 +115,7 @@ try {
 
     Step 'Converter tools (FFmpeg, ImageMagick)'
     & (Join-Path $PSScriptRoot 'fetch-tools.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'Downloading the converter tools failed (see tools.log)' }
+    if ($LASTEXITCODE -ne 0) { throw 'Downloading the converter tools failed (see logs\tools.log)' }
     Start-Transcript -Path $log -Append | Out-Null
 
     Step 'JavaScript packages'

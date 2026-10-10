@@ -164,6 +164,9 @@ pub fn run_steps(id: u64, steps: &[convert::Step], out_dir: Option<&Path>, sink:
         report_all(i, 0.0);
         let started = Instant::now();
         let r = convert::run(step, &mut |p| report_all(i, p));
+        if let Ok(made) = &r {
+            crate::stats::after_step(step, made, started.elapsed().as_secs_f64());
+        }
         if r.as_ref().err().map(|e| e != crate::procs::CANCELLED).unwrap_or(true) {
             sink(Event::StepDone { index: i, inputs: step.inputs.clone(), result: r.clone(), seconds: started.elapsed().as_secs_f64() });
         }

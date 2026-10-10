@@ -72,7 +72,21 @@ pub enum Op {
     /// Camera JPG: the picture the camera stored inside a RAW file.
     CameraJpg { level: Option<Level>, fixed: u32 },
     /// Compress to a size (None: the smallest that still looks the same).
-    ToSize { kind: size::Kind, bytes: Option<u64>, trim: Option<f64> },
+    /// `quality`: the presets (as tuned) for the "looks the same" part.
+    ToSize { kind: size::Kind, bytes: Option<u64>, trim: Option<f64>, quality: Box<Quality> },
+}
+
+impl Op {
+    /// The picture preset in use says to remove the GPS location.
+    pub fn strips_gps(&self) -> bool {
+        match self {
+            Op::Picture { level, .. } | Op::Png { level, .. } | Op::CameraJpg { level, .. } => level.is_some_and(|l| l.strip_gps),
+            Op::ToSize { kind: size::Kind::Image, quality, .. } => {
+                quality.image_level().unwrap_or_else(|| Level::image(quality, crate::tune::Grade::Balanced)).strip_gps
+            }
+            _ => false,
+        }
+    }
 }
 
 /// One unit of work producing one output file or folder.
@@ -188,7 +202,7 @@ pub fn plan_sized(target_id: &str, files: &[PathBuf], q: &Quality, ask: Option<s
     // (the smallest that looks the same), video and PDF keep their own Compress.
     if let Some(kind) = size::Kind::of_target(target_id) {
         if ask.is_some() || matches!(kind, size::Kind::Image | size::Kind::Audio) {
-            let p = size::plan(kind, files, ask)?;
+            let p = size::plan(kind, files, ask, q)?;
             return Ok((p.steps, p.notes));
         }
     }
@@ -221,7 +235,7 @@ fn plan_plain(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<Ste
     // "Size when converting": shrink pictures larger than this (never enlarge).
     let fit = || if q.convert_max > 0 { s(&["-resize", &format!("{0}x{0}>", q.convert_max)]) } else { Vec::new() };
     let opts = video::Opts::from_quality(q);
-    let level = Level::from_setting(&q.image);
+    let level = q.image_level();
     let picture = |prep: Vec<String>, format: Lossy, fixed: u32| Op::Picture { prep, format, level, fixed };
     let png = |args: Vec<String>| Op::Png { args, level };
     let flatten = || s(&["-background", "white", "-alpha", "remove", "-alpha", "off"]);
@@ -303,13 +317,7 @@ fn plan_plain(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<Ste
             "pdf",
             Some("compressed"),
             None,
-            Op::PdfCompress {
-                level: match q.pdf_compress.as_str() {
-                    "small" => Level::Small,
-                    "high" => Level::Best,
-                    _ => Level::Balanced,
-                },
-            },
+            Op::PdfCompress { level: q.pdf_level() },
         ),
         "pdf.grayscale" => each(
             "pdf",
@@ -814,6 +822,10 @@ pub fn run(step: &Step, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String
             if !final_path.exists() {
                 return Err("The converter finished but didn't write anything.".into());
             }
+            // After everything else (a RAW photo's EXIF is copied in at the end).
+            if step.op.strips_gps() && final_path.is_file() {
+                look::strip_gps(&final_path);
+            }
             progress(1.0);
             Ok(final_path)
         }
@@ -952,7 +964,7 @@ fn run_op(step: &Step, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<P
             Ok(output.to_path_buf())
         }
         Op::Video { job, opts } => video::run(input, *job, opts, output, progress),
-        Op::ToSize { kind, bytes, trim } => size::run(*kind, input, *bytes, *trim, output, progress),
+        Op::ToSize { kind, bytes, trim, quality } => size::run(*kind, input, *bytes, *trim, quality, output, progress),
         Op::Data { to } => {
             data::convert(input, *to, output)?;
             Ok(output.to_path_buf())
@@ -1065,7 +1077,7 @@ fn pdf_pages(
                 Some(level) => {
                     let tmp = TempDir::new("pages")?;
                     let crop = look::search_crop(&pngs[0], &[], &tmp.0)?;
-                    look::search_quality(&crop, lossy, level.picture_target())?
+                    look::search_quality(&crop, lossy, level.picture_target(), level.floor)?
                 }
                 None => quality,
             };
@@ -1193,7 +1205,7 @@ fn pdf_compress(input: &Path, level: Level, output: &Path, progress: &mut dyn Fn
     let gentlest = made.iter().find(|m| m.0.is_none()).map(|m| m.2).unwrap_or(u64::MAX);
     let mut candidates: Vec<&(Option<u32>, PathBuf, u64)> = made.iter().filter(|m| m.0.is_none() || m.2 < gentlest).collect();
     candidates.sort_by_key(|m| m.2);
-    let render_dpi = if level == Level::Best { 150 } else { 110 };
+    let render_dpi = level.check_dpi;
     let pages = look::pdf_page_count(&src).unwrap_or(1);
     let mut original_pages = Vec::new();
     for page in look::sample_pages(pages) {
@@ -1232,13 +1244,8 @@ const PDF_SIZE_STRENGTHS: [Option<u32>; 8] = [None, Some(300), Some(200), Some(1
 /// PDF Compress to a size: every strength is made (four at a time) and the
 /// gentlest one that fits wins. When none fits, the smallest is kept and
 /// the card says so. Without a size: the usual Compress.
-pub(crate) fn pdf_to_size(input: &Path, target: Option<u64>, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
+pub(crate) fn pdf_to_size(input: &Path, target: Option<u64>, level: Level, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
     let Some(target) = target else {
-        let level = match crate::settings::get().quality.pdf_compress.as_str() {
-            "small" => Level::Small,
-            "high" => Level::Best,
-            _ => Level::Balanced,
-        };
         return pdf_compress(input, level, output, progress);
     };
     let exe = tools::require(Tool::Ghostscript)?;
@@ -1504,7 +1511,7 @@ mod tests {
         let (sized, _) = plan_sized("video.compress", &f("a.mp4"), &q, Some(ask)).unwrap_or_default();
         assert!(sized.is_empty(), "missing files can't be measured");
         assert!(args(plan_with("audio.mp3", &f("a.wav"), &q).unwrap()).contains("mp3=192"));
-        assert!(args(plan_with("pdf.compress", &f("a.pdf"), &q).unwrap()).contains("Small"));
+        assert!(args(plan_with("pdf.compress", &f("a.pdf"), &q).unwrap()).contains("grade: Small"));
         match &plan_with("pdf.jpg", &f("a.pdf"), &q).unwrap()[0].op {
             Op::PdfPages { dpi, quality, .. } => assert_eq!((*dpi, *quality), (300, 72)),
             other => panic!("{other:?}"),
@@ -1512,7 +1519,7 @@ mod tests {
         // Defaults are what Convertino always did.
         let d = Quality::default();
         let jpg = args(plan_with("image.jpg", &f("a.png"), &d).unwrap());
-        assert!(jpg.contains("Some(Balanced)") && !jpg.contains("-resize"), "{jpg}");
+        assert!(jpg.contains(&format!("{:?}", Some(Level::Balanced))) && !jpg.contains("-resize"), "{jpg}");
         assert!(args(plan_with("audio.mp3", &f("a.wav"), &d).unwrap()).contains("mp3=320"));
         let fixed = Quality { image: "fixed".into(), ..Quality::default() };
         assert!(args(plan_with("image.webp", &f("a.png"), &fixed).unwrap()).contains("None fixed=85"));

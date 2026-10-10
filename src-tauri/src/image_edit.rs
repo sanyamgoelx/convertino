@@ -9,7 +9,7 @@
 //! quality search as conversions); the original is never changed.
 
 use crate::convert::{self, s, Op, Step, TempDir};
-use crate::look::{Level, Lossy};
+use crate::look::Lossy;
 use crate::settings::Quality;
 use crate::tools::{self, Tool};
 use serde::{Deserialize, Serialize};
@@ -210,7 +210,7 @@ pub fn steps(original: &Path, input: &Path, req: &Request, q: &Quality) -> Resul
         "jpg" | "png" | "webp" | "avif" | "tiff" => req.format.clone(),
         _ => "jpg".to_string(),
     };
-    let level = Level::from_setting(&q.image);
+    let level = q.image_level();
     let flatten = s(&["-background", "white", "-alpha", "remove", "-alpha", "off"]);
     let mut out = Vec::new();
     for (i, item) in req.items.iter().enumerate() {

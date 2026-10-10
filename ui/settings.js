@@ -18,7 +18,7 @@ const OK = "M5 12.5l4.5 4.5L19 7.5";
 const QDEFAULT = { jpg: 90, webp: 85, resize: 1920, convertMax: 0, dpi: 150, pdfCompress: "balanced", mp3: 320, video: "balanced", gifWidth: 480, gifSeconds: 30, image: "balanced" };
 const QGROUPS = [
   { title: "Images", rows: [
-    { k: "image", label: "File size", desc: "Convertino tries a few settings and keeps the smallest file that still looks like the original. Also used for PDF pages, Compress and re-encoded video", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"], ["fixed", "Fixed (use the numbers below)"]] },
+    { k: "image", tune: "image", label: "File size", desc: "Convertino tries a few settings and keeps the smallest file that still looks like the original. Also used for PDF pages, Compress and re-encoded video", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"], ["fixed", "Fixed (use the numbers below)"]] },
     { k: "jpg", label: "JPG quality", desc: "Only when File size is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
     { k: "webp", label: "WebP quality", desc: "Only when File size is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
     { k: "convertMax", label: "Size when converting", desc: "Bigger pictures are scaled down; smaller ones are left as they are",
@@ -26,13 +26,13 @@ const QGROUPS = [
   ] },
   { title: "PDF", rows: [
     { k: "dpi", label: "Page images", desc: "Resolution of JPG, PNG and WebP pages", options: [[72, "Screen (72 DPI)"], [150, "Standard (150 DPI)"], [300, "Print (300 DPI)"]] },
-    { k: "pdfCompress", label: "Compress", desc: "For the size ring's top choice: how close the compressed PDF must look to the original; the smallest version that does is kept", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["high", "Best quality"]] },
+    { k: "pdfCompress", tune: "pdf", label: "Compress", desc: "For the size ring's top choice: how close the compressed PDF must look to the original; the smallest version that does is kept", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["high", "Best quality"]] },
   ] },
   { title: "Audio", rows: [
     { k: "mp3", label: "MP3 quality", desc: "Variable bitrate: quiet and simple parts take less space. Never more than a lossy original had. Also used when pulling audio out of video", options: [[128, "About 130 kbps"], [160, "About 165 kbps"], [192, "About 190 kbps"], [320, "Highest (about 245 kbps)"]] },
   ] },
   { title: "Video", rows: [
-    { k: "video", label: "Re-encoded video", desc: "MP4, MOV, WebM, 720p and Compress (H.265). Short samples are measured first, so the whole video gets the smallest setting that still looks the same", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"]] },
+    { k: "video", tune: "video", label: "Re-encoded video", desc: "MP4, MOV, WebM, 720p and Compress. Short samples are measured first, so the whole video gets the smallest setting that still looks the same", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"]] },
     { k: "gifWidth", label: "GIF width", desc: "Height follows", options: [[320, "320 px"], [480, "480 px"], [640, "640 px"]] },
     { k: "gifSeconds", label: "GIF length", desc: "Longer videos use only the start", options: [[10, "First 10 s"], [30, "First 30 s"], [60, "First 60 s"]] },
   ] },
@@ -209,6 +209,7 @@ function setPage(p) {
   $("main").scrollTop = 0;
   if (p === "converters") refreshTools();
   if (p === "ai") refreshAi();
+  if (p === "quality") loadTuneInfo();
 }
 
 function render() {
@@ -407,11 +408,20 @@ function renderQuality() {
   $("qgroups").innerHTML = QGROUPS.map((g) =>
     `<h2>${esc(g.title)}</h2><div class="card list">` + g.rows.map((r) => {
       const id = "q-" + r.k;
+      const kind = r.tune;
+      const grade = kind ? GRADE_OF[q[r.k]] : null;
       const control = r.options
-        ? `<select id="${id}" data-q="${r.k}">${r.options.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(q[r.k]) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`
+        ? `<select id="${id}" data-q="${r.k}">${r.options.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(q[r.k]) ? " selected" : ""}>${esc(l)}${kind && GRADE_OF[v] && tuneEdited(kind, GRADE_OF[v]) ? " ●" : ""}</option>`).join("")}</select>`
         : `<input id="${id}" type="range" data-q="${r.k}" min="${r.min}" max="${r.max}" step="1" value="${q[r.k]}"><span class="val" data-v="${r.k}">${q[r.k]}</span>`;
-      return `<div class="qrow"><label for="${id}" class="grow"><div>${esc(r.label)}</div><div class="sub">${esc(r.desc)}</div></label>${control}</div>`;
+      if (!kind) return `<div class="qrow"><label for="${id}" class="grow"><div>${esc(r.label)}</div><div class="sub">${esc(r.desc)}</div></label>${control}</div>`;
+      const edited = grade && tuneEdited(kind, grade);
+      const open = !!(grade && tuneOpen[kind]);
+      const button = `<button type="button" class="btn tune-btn" data-tune="${kind}" aria-expanded="${open}"${grade ? "" : ' disabled title="Tune works with Smaller, Balanced or Best"'}>Tune ${CHEVRON}</button>`;
+      return `<div class="qrow"><label for="${id}" class="grow"><div>${esc(r.label)}${edited ? '<span class="edited">● edited</span>' : ""}</div><div class="sub">${esc(r.desc)}</div></label>${control}${button}</div>` +
+        (grade ? `<div class="tune-stats">${tuneStatsLine(kind, grade)}</div>` : "") +
+        (open ? tunePanel(kind, grade) : "");
     }).join("") + `</div>`).join("");
+  renderImport();
 }
 
 $("qgroups").addEventListener("input", (e) => {
@@ -425,7 +435,286 @@ $("qgroups").addEventListener("change", (e) => {
   const raw = e.target.value;
   save({ quality: { [k]: typeof QDEFAULT[k] === "number" ? Number(raw) : raw } });
 });
-$("reset-quality").addEventListener("click", () => save({ quality: Object.assign({}, QDEFAULT) }));
+$("reset-quality").addEventListener("click", async () => {
+  try { await invoke("presets_apply", { tune: {} }); } catch (e) { /* the rest still resets */ }
+  await save({ quality: Object.assign({}, QDEFAULT) });
+  loadTuneInfo();
+});
+
+// ---------- Tune: the settings behind each preset ----------
+// Each preset keeps only what was changed (settings.quality.tune.<kind>.<grade>);
+// the rest is Convertino's default (tune_info). Rust keeps the values in range and
+// the look scores in order (Smaller ≤ Balanced ≤ Best).
+
+const GRADES = ["small", "balanced", "best"];
+const GRADE_OF = { small: "small", balanced: "balanced", best: "best", high: "best" };
+const GRADE_NAME = { small: "Smaller", balanced: "Balanced", best: "Best" };
+const CHEVRON = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
+const LOOK_WORDS = [[0, "visibly softer"], [70, "looks very close"], [80, "looks the same"], [87, "the same side by side"], [95, "near identical"]];
+const VLOOK_WORDS = [[0, "visibly softer"], [89, "looks very close"], [93, "looks the same"], [95.5, "the same side by side"], [99, "near identical"]];
+const lookWord = (words, v) => words.reduce((w, [n, s]) => (v >= n ? s : w), words[0][1]);
+const nth = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
+const TUNE = {
+  image: [
+    { g: "Look" },
+    { k: "look", label: "How close it must look", tech: "SSIMULACRA2 score", min: 50, max: 95, step: 1, ends: ["Smaller", "Closer"], words: LOOK_WORDS, order: true },
+    { k: "floor", label: "Never go below quality", tech: "JPG and WebP (AVIF 10 lower)", min: 30, max: 90, step: 1, ends: ["30", "90"] },
+    { g: "Speed and privacy" },
+    { k: "png", label: "PNG effort", tech: "Lossless: only changes how long it takes", seg: [[0, "Quick"], [1, "Normal"], [2, "Thorough"]] },
+    { k: "stripGps", label: "Remove location (GPS)", tech: "Camera, date and the rest of the EXIF are kept", toggle: true },
+  ],
+  video: [
+    { g: "Look" },
+    { k: "look", label: "How close it must look", tech: "VMAF score", min: 80, max: 99, step: 0.5, ends: ["Smaller", "Closer"], words: VLOOK_WORDS, order: true },
+    { k: "codec", label: "Compress as", tech: "Converting to MP4 stays H.264", seg: [["h265", "H.265 (smaller)"], ["h264", "H.264 (plays everywhere)"], ["av1", "AV1"]] },
+    { g: "Size limits · Compress" },
+    { k: "maxRes", label: "Never bigger than", tech: "Smaller videos are left as they are", seg: [[0, "Keep"], [2160, "4K"], [1440, "1440p"], [1080, "1080p"], [720, "720p"]] },
+    { k: "maxFps", label: "Frame rate at most", tech: "Divided evenly: 144 → 48, 120 → 60", seg: [[0, "Keep"], [60, "60"], [30, "30"]] },
+    { k: "audio", label: "Audio", tech: "AAC; kept as it is when already small", seg: [[96, "96 kbps"], [128, "128 kbps"], [192, "192 kbps"]] },
+    { g: "Speed" },
+    { k: "encoder", label: "Encode on", tech: "Graphics card: fast · Processor (x265, x264): smaller files · Auto: measures both now and then", seg: [["gpu", "Graphics card"], ["cpu", "Processor"], ["auto", "Auto"]] },
+    { k: "effort", label: "Encoder effort", tech: "x265 fast / medium / slow · NVIDIA p4 / p5 / p7", seg: [[0, "Faster"], [1, "Medium"], [2, "Slower"]] },
+    { k: "recheck", label: "Full look check every", tech: "Once a setting is confirmed for a kind of video", min: 1, max: 20, step: 1, ends: ["Every video", "Every 20th"], fmt: (v) => (v <= 1 ? "video" : nth(v)) },
+  ],
+  pdf: [
+    { g: "Look" },
+    { k: "look", label: "How close it must look", tech: "SSIMULACRA2 on rendered pages", min: 50, max: 95, step: 1, ends: ["Smaller", "Closer"], words: LOOK_WORDS, order: true },
+    { k: "checkDpi", label: "Check pages at", tech: "Higher catches finer detail, and takes longer", seg: [[110, "110 DPI"], [150, "150 DPI"], [200, "200 DPI"]] },
+  ],
+};
+
+let tuneInfo = null;                                  // { defaults, stats, av1 }
+const tuneOpen = { image: false, video: false, pdf: false };
+const tuneTests = {};                                 // kind -> { state, name, result, error }
+let importPending = null;                             // { path, tune, changes }
+
+async function loadTuneInfo() {
+  try { tuneInfo = await invoke("tune_info"); } catch (e) { tuneInfo = null; }
+  if (page === "quality") renderQuality();
+}
+
+function tuneStored(kind, grade) {
+  const t = (view.settings.quality && view.settings.quality.tune) || {};
+  return (t[kind] && t[kind][grade]) || {};
+}
+
+function tuneEdited(kind, grade) {
+  const s = tuneStored(kind, grade);
+  return Object.keys(s).some((k) => s[k] !== null && s[k] !== undefined);
+}
+
+function tuneValues(kind, grade) {
+  const d = (tuneInfo && tuneInfo.defaults && tuneInfo.defaults[grade] && tuneInfo.defaults[grade][kind]) || {};
+  const s = tuneStored(kind, grade);
+  const out = Object.assign({}, d);
+  for (const k in s) if (s[k] !== null && s[k] !== undefined) out[k] = s[k];
+  return out;
+}
+
+/// A look score can't pass the neighbouring presets'.
+function lookBounds(kind, grade, knob) {
+  const i = GRADES.indexOf(grade);
+  const lo = i > 0 ? tuneValues(kind, GRADES[i - 1]).look : knob.min;
+  const hi = i < 2 ? tuneValues(kind, GRADES[i + 1]).look : knob.max;
+  return { lo: Math.max(knob.min, lo ?? knob.min), hi: Math.min(knob.max, hi ?? knob.max), below: i > 0 ? GRADES[i - 1] : null, above: i < 2 ? GRADES[i + 1] : null };
+}
+
+function duration(sec) {
+  if (sec >= 90) return `${Math.round(sec / 60)} min`;
+  if (sec >= 10) return `${Math.round(sec)} s`;
+  return `${(Math.round(sec * 10) / 10)} s`;
+}
+
+function tuneStatsLine(kind, grade) {
+  if (!tuneInfo) return "";
+  const s = tuneInfo.stats && tuneInfo.stats[`${kind}.${grade}`];
+  if (!s || !s.count) return esc(tuneEdited(kind, grade) ? "No compressions since you tuned it yet." : "No compressions with this preset yet.");
+  const pct = Math.max(1, Math.round(s.ratio * 100));
+  const what = s.count === 1 ? "Your last compression" : `Your last ${s.count} compressions`;
+  return `${what}: <b>${pct}%</b> of the original on average, <b>${duration(s.seconds)}</b> each`;
+}
+
+function tunePanel(kind, grade) {
+  const v = tuneValues(kind, grade);
+  const knobs = TUNE[kind].map((k) => {
+    if (k.g) return `<div class="tune-group">${esc(k.g)}</div>`;
+    const val = v[k.k];
+    const head = `<div class="knob-text"><div>${esc(k.label)}</div><div class="sub">${esc(k.tech)}${k.words ? ` · <span data-word="${k.k}">${esc(lookWord(k.words, val))}</span>` : ""}</div></div>`;
+    if (k.toggle) {
+      return `<div class="knob">${head}<button type="button" class="switch" role="switch" data-tswitch="${k.k}" aria-checked="${!!val}"><span></span></button></div>`;
+    }
+    if (k.seg) {
+      return `<div class="knob">${head}<div class="seg" role="radiogroup" aria-label="${esc(k.label)}">` + k.seg.map(([sv, label]) => {
+        const off = k.k === "codec" && sv === "av1" && tuneInfo && !tuneInfo.av1;
+        return `<button type="button" role="radio" data-tseg="${k.k}" data-v="${esc(sv)}" aria-checked="${String(sv) === String(val)}"${off ? ' disabled title="There\'s no AV1 encoder on this computer"' : ""}>${esc(label)}</button>`;
+      }).join("") + `</div></div>`;
+    }
+    let hint = "";
+    if (k.order) {
+      const b = lookBounds(kind, grade, k);
+      if (b.below && val <= b.lo) hint = `Can't go below ${GRADE_NAME[b.below]} (${b.lo}).`;
+      else if (b.above && val >= b.hi) hint = `Can't go above ${GRADE_NAME[b.above]} (${b.hi}).`;
+    }
+    const shown = k.fmt ? k.fmt(val) : val;
+    return `<div class="knob">${head}<div class="knob-range"><input type="range" data-trange="${k.k}" min="${k.min}" max="${k.max}" step="${k.step}" value="${val}" aria-label="${esc(k.label)}">` +
+      `<span class="ends"><span>${esc(k.ends[0])}</span><span>${esc(k.ends[1])}</span></span></div><span class="val" data-tval="${k.k}">${esc(shown)}</span>` +
+      `<div class="knob-hint" data-thint="${k.k}">${esc(hint)}</div></div>`;
+  }).join("");
+  return `<div class="tune-panel" data-tkind="${kind}" data-tgrade="${grade}">${knobs}${testBox(kind)}` +
+    `<div class="tune-foot"><span class="sub">Changes save straight away and apply everywhere: the wheel, Compress, the command line and AI apps.</span>` +
+    `<button type="button" class="link" data-treset${tuneEdited(kind, grade) ? "" : " disabled"}>Reset ${GRADE_NAME[grade]} to default</button></div></div>`;
+}
+
+function testBox(kind) {
+  const t = tuneTests[kind] || { state: "idle" };
+  const what = kind === "video" ? "measures a few seconds of a video and makes a short sample" : "compresses a copy";
+  if (t.state === "running") {
+    return `<div class="test-box" data-test-kind="${kind}"><div class="grow"><b>${esc(t.name)}</b><div class="sub">Testing…</div><div class="test-bar"><i></i></div></div><button type="button" class="btn" data-tcancel>Cancel</button></div>`;
+  }
+  if (t.state === "error") {
+    return `<div class="test-box" data-test-kind="${kind}"><div class="grow"><b>${esc(t.name)}</b><div class="sub bad">${esc(t.error)}</div></div><button type="button" class="btn" data-ttest>Choose file…</button></div>`;
+  }
+  if (t.state === "done") {
+    const r = t.result;
+    const ok = r.score === null || r.score === undefined || r.score >= r.target - 0.05;
+    const look = r.score === null || r.score === undefined ? "Checked" : `${Math.round(r.score * 10) / 10} <span class="sub">/ ${r.target}</span>`;
+    const time = r.estimate ? `about ${duration(r.seconds)}` : duration(r.seconds);
+    return `<div class="test-box done" data-test-kind="${kind}"><div class="grow"><b>${esc(r.name)}</b> <span class="${ok ? "good" : "warnc"}">${ok ? "✓ reached the look score" : "Didn't reach the look score; the closest setting is used"}</span>` +
+      `<div class="test-grid"><div><span>Size</span><b>~${Math.max(1, Math.round(r.ratio * 100))}%</b></div><div><span>Look</span><b>${look}</b></div>` +
+      `<div><span>${r.estimate ? "Whole video" : "Took"}</span><b>${esc(time)}</b></div><div><span>Setting</span><b>${esc(r.setting)}</b></div></div></div>` +
+      `<div class="test-actions"><button type="button" class="btn primary" data-tcompare="${r.compare}">Compare</button><button type="button" class="link" data-ttest>Try another file</button></div></div>`;
+  }
+  return `<div class="test-box" data-test-kind="${kind}"><div class="grow"><b>Test on a file</b><div class="sub">Runs these settings on a file you pick (or drop here): ${what}. Nothing is saved next to it.</div></div><button type="button" class="btn" data-ttest>Choose file…</button></div>`;
+}
+
+function saveTune(kind, grade, key, value) {
+  delete tuneTests[kind];
+  return save({ quality: { tune: { [kind]: { [grade]: { [key]: value } } } } }).then(loadTuneInfo);
+}
+
+async function runTest(kind, grade, path) {
+  const name = path.split(/[\\/]/).pop();
+  tuneTests[kind] = { state: "running", name };
+  renderQuality();
+  try {
+    const result = await invoke("tune_test", { kind, grade, quality: view.settings.quality, path });
+    tuneTests[kind] = { state: "done", result };
+  } catch (e) {
+    const msg = String(e);
+    tuneTests[kind] = /cancel/i.test(msg) ? undefined : { state: "error", name, error: msg };
+    if (!tuneTests[kind]) delete tuneTests[kind];
+  }
+  renderQuality();
+}
+
+$("qgroups").addEventListener("click", async (e) => {
+  const tb = e.target.closest("[data-tune]");
+  if (tb) { tuneOpen[tb.dataset.tune] = !tuneOpen[tb.dataset.tune]; renderQuality(); return; }
+  const panel = e.target.closest(".tune-panel");
+  if (!panel) return;
+  const kind = panel.dataset.tkind, grade = panel.dataset.tgrade;
+  const seg = e.target.closest("[data-tseg]");
+  if (seg && !seg.disabled) {
+    const raw = seg.dataset.v;
+    return saveTune(kind, grade, seg.dataset.tseg, /^-?\d+(\.\d+)?$/.test(raw) ? Number(raw) : raw);
+  }
+  const sw = e.target.closest("[data-tswitch]");
+  if (sw) return saveTune(kind, grade, sw.dataset.tswitch, sw.getAttribute("aria-checked") !== "true");
+  if (e.target.closest("[data-treset]")) {
+    const keys = Object.keys(tuneStored(kind, grade));
+    delete tuneTests[kind];
+    return save({ quality: { tune: { [kind]: { [grade]: Object.fromEntries(keys.map((k) => [k, null])) } } } }).then(loadTuneInfo);
+  }
+  if (e.target.closest("[data-ttest]")) {
+    const path = await invoke("tune_pick_file").catch(() => null);
+    if (path) runTest(kind, grade, path);
+    return;
+  }
+  if (e.target.closest("[data-tcancel]")) { invoke("tune_test_cancel").catch(() => {}); return; }
+  const cmp = e.target.closest("[data-tcompare]");
+  if (cmp) invoke("compare_open", { id: Number(cmp.dataset.tcompare) }).catch((err) => toast(String(err)));
+});
+
+$("qgroups").addEventListener("input", (e) => {
+  const key = e.target.dataset.trange;
+  if (!key) return;
+  const panel = e.target.closest(".tune-panel");
+  const kind = panel.dataset.tkind, grade = panel.dataset.tgrade;
+  const knob = TUNE[kind].find((k) => k.k === key);
+  let v = Number(e.target.value);
+  let hint = "";
+  if (knob.order) {
+    const b = lookBounds(kind, grade, knob);
+    if (b.below && v <= b.lo) { v = b.lo; hint = `Can't go below ${GRADE_NAME[b.below]} (${b.lo}).`; }
+    if (b.above && v >= b.hi) { v = b.hi; hint = `Can't go above ${GRADE_NAME[b.above]} (${b.hi}).`; }
+    e.target.value = v;
+  }
+  panel.querySelector(`[data-tval="${key}"]`).textContent = knob.fmt ? knob.fmt(v) : v;
+  const w = panel.querySelector(`[data-word="${key}"]`);
+  if (w && knob.words) w.textContent = lookWord(knob.words, v);
+  const h = panel.querySelector(`[data-thint="${key}"]`);
+  if (h) h.textContent = hint;
+});
+
+$("qgroups").addEventListener("change", (e) => {
+  const key = e.target.dataset.trange;
+  if (!key) return;
+  const panel = e.target.closest(".tune-panel");
+  saveTune(panel.dataset.tkind, panel.dataset.tgrade, key, Number(e.target.value));
+});
+
+// A file dropped on a Test box is tested there.
+if (tauri && tauri.webview && tauri.webview.getCurrentWebview) {
+  try {
+    tauri.webview.getCurrentWebview().onDragDropEvent((ev) => {
+      const p = ev.payload;
+      if (!p || p.type !== "drop" || !p.paths || !p.paths.length || page !== "quality") return;
+      const scale = window.devicePixelRatio || 1;
+      const el = document.elementFromPoint(p.position.x / scale, p.position.y / scale);
+      const box = el && el.closest("[data-test-kind]");
+      const panel = box && box.closest(".tune-panel");
+      if (panel) runTest(panel.dataset.tkind, panel.dataset.tgrade, p.paths[0]);
+    });
+  } catch (e) { /* no drag and drop here */ }
+}
+
+// ---------- export and import presets ----------
+
+$("presets-export").addEventListener("click", async () => {
+  try {
+    const path = await invoke("presets_export");
+    if (path) toast(`Saved ${path.split(/[\\/]/).pop()}`);
+  } catch (e) { toast(String(e)); }
+});
+
+$("presets-import").addEventListener("click", async () => {
+  try {
+    importPending = await invoke("presets_import");
+  } catch (e) { toast(String(e)); importPending = null; }
+  renderImport();
+});
+
+function renderImport() {
+  const box = $("import-box");
+  if (!importPending) { box.hidden = true; box.innerHTML = ""; return; }
+  const name = importPending.path.split(/[\\/]/).pop();
+  const list = importPending.changes.length
+    ? `<ul>${importPending.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>`
+    : `<div class="sub">It's the same as what you have now.</div>`;
+  box.innerHTML = `<div><b>${esc(name)}</b> would change:</div>${list}` +
+    `<div class="buttons end"><button type="button" class="btn" data-icancel>Cancel</button><button type="button" class="btn primary" data-iapply${importPending.changes.length ? "" : " disabled"}>Use these presets</button></div>`;
+  box.hidden = false;
+}
+
+$("import-box").addEventListener("click", async (e) => {
+  if (e.target.closest("[data-icancel]")) { importPending = null; renderImport(); return; }
+  if (e.target.closest("[data-iapply]") && importPending) {
+    try { view = await invoke("presets_apply", { tune: importPending.tune }); toast("Presets imported."); } catch (err) { toast(String(err)); }
+    importPending = null;
+    render();
+    loadTuneInfo();
+  }
+});
 
 // ---------- Converters page ----------
 
@@ -882,6 +1171,23 @@ function demoInvoke(cmd, args) {
     case "converters_check": return Promise.resolve(["ffmpeg"]);
     case "converters_remove": d.tools.forEach((t) => { if (t.state === "ready") { t.state = "missing"; t.sizeMb = 0; } }); return Promise.resolve(163);
     case "choose_folder": return Promise.resolve("D:\\Converted");
+    case "tune_info": {
+      const dv = (g) => ({
+        image: { look: [70, 80, 87][g], floor: 40, png: g === 2 ? 2 : 1, stripGps: false },
+        video: { look: [89, 93, 95.5][g], codec: "h265", maxRes: g === 0 ? 1080 : 0, maxFps: g === 0 ? 60 : 0, audio: 128, encoder: g === 2 ? "auto" : "gpu", effort: 1, recheck: 10 },
+        pdf: { look: [70, 80, 87][g], checkDpi: g === 2 ? 150 : 110 },
+      });
+      return Promise.resolve({
+        defaults: { small: dv(0), balanced: dv(1), best: dv(2) },
+        stats: { "video.balanced": { count: 40, ratio: 0.31, seconds: 72 }, "image.balanced": { count: 12, ratio: 0.34, seconds: 0.6 } },
+        av1: false,
+      });
+    }
+    case "tune_pick_file": return Promise.resolve("E:\\Videos\\Valorant 2026-10-09.mp4");
+    case "tune_test": return new Promise((res) => setTimeout(() => res({ name: "Valorant 2026-10-09.mp4", ratio: 0.27, score: 94.3, target: 93, setting: "HEVC (NVIDIA) CQ 27", seconds: 95, estimate: true, compare: 7 }), 1500));
+    case "presets_export": return Promise.resolve("C:\\Users\\you\\Documents\\convertino-presets.json");
+    case "presets_import": return Promise.resolve({ path: "C:\\Users\\you\\Downloads\\crofty-presets.json", tune: { video: { balanced: { look: 91 } } }, changes: ["Video › Balanced: look 93.0 → 91.0", "Video › Balanced: encoder gpu → cpu"] });
+    case "presets_apply": d.settings.quality.tune = args.tune; return Promise.resolve(viewOf());
     case "ai_status": return Promise.resolve(d.ai || (d.ai = {
       command: { installed: !new URLSearchParams(location.search).get("os"), path: "C:\\Users\\you\\AppData\\Local\\Convertino\\bin\\convertino.exe", canInstall: true },
       apps: [

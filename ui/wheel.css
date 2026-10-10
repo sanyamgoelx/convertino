@@ -233,6 +233,11 @@ body.ringmode .ring { display: block; }
   height: 32px; border-radius: 5px; border: 1px solid var(--surface-line);
   background: var(--hub-bg); color: var(--ink); font: inherit; padding: 0 8px;
 }
+.opts-tune { border-top: 1px solid var(--surface-line); padding-top: 8px; }
+.opts-tune summary { cursor: pointer; font-size: 12.5px; color: var(--accent-fg); list-style-position: inside; }
+.opts-tune .opts-fields { margin-top: 10px; }
+.opts-check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.opts-check input { accent-color: var(--accent); margin: 0; }
 .opts-keep { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
 .opts-keep input { accent-color: var(--accent); margin: 0; }
 .opts-buttons { display: flex; justify-content: flex-end; gap: 8px; }

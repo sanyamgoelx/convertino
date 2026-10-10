@@ -24,6 +24,15 @@ pub fn compare_pairs(id: u64) -> Vec<(PathBuf, PathBuf)> {
     pairs().lock().ok().and_then(|p| p.get(&id).cloned()).unwrap_or_default()
 }
 
+/// Compare for something that isn't a job (Settings' "Test on a file"); returns its id.
+pub fn register_compare(made_from: Vec<(PathBuf, PathBuf)>) -> u64 {
+    let id = crate::engine::new_id();
+    if let Ok(mut p) = pairs().lock() {
+        p.insert(id, made_from);
+    }
+    id
+}
+
 /// Outputs of finished jobs, for Open folder and Undo.
 fn outputs_map() -> &'static Mutex<HashMap<u64, Vec<PathBuf>>> {
     static OUT: OnceLock<Mutex<HashMap<u64, Vec<PathBuf>>>> = OnceLock::new();

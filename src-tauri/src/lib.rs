@@ -30,7 +30,10 @@ mod report;
 mod settings;
 mod shell;
 mod size;
+mod stats;
 mod tools;
+mod try_preset;
+mod tune;
 mod update;
 #[cfg(windows)]
 mod alt_click;
@@ -773,6 +776,131 @@ fn pick_folder() -> Option<String> {
     None
 }
 
+// ---------- Settings › Quality › Tune ----------
+
+/// What the Tune panels need besides the settings: Convertino's defaults,
+/// how each preset did lately, and whether AV1 can be made here.
+#[tauri::command]
+async fn tune_info() -> serde_json::Value {
+    let t = settings::get().quality.tune;
+    tauri::async_runtime::spawn_blocking(move || {
+        serde_json::json!({
+            "defaults": tune::defaults_json(),
+            "stats": stats::summary(&t),
+            "av1": video::av1_available(),
+        })
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// "Test on a file": the preset `grade` of `kind`, tuned as in `quality` (what's on screen).
+#[tauri::command]
+async fn tune_test(kind: String, grade: String, quality: settings::Quality, path: String) -> Result<try_preset::Outcome, String> {
+    let quality = quality.clamped();
+    tauri::async_runtime::spawn_blocking(move || try_preset::run(&kind, &grade, &quality, std::path::Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn tune_test_cancel() {
+    try_preset::cancel();
+}
+
+/// A file to test a preset on.
+#[tauri::command]
+async fn tune_pick_file() -> Option<String> {
+    tauri::async_runtime::spawn_blocking(|| pick_file("Test the preset on…", false, "")).await.ok().flatten()
+}
+
+/// Saves the tuned presets to a file the person names; returns where.
+#[tauri::command]
+async fn presets_export() -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(|| pick_file("Export presets", true, "convertino-presets.json")).await.ok().flatten();
+    let Some(path) = picked else { return Ok(None) };
+    let path = if path.to_lowercase().ends_with(".json") { path } else { format!("{path}.json") };
+    let text = serde_json::to_string_pretty(&settings::get().quality.tune.export()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("Couldn't save the presets: {e}"))?;
+    Ok(Some(path))
+}
+
+#[derive(Serialize)]
+struct PresetsFile {
+    path: String,
+    tune: tune::Tunes,
+    changes: Vec<String>,
+}
+
+/// Reads a presets file and says what it would change (nothing is applied yet).
+#[tauri::command]
+async fn presets_import() -> Result<Option<PresetsFile>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(|| pick_file("Import presets", false, "")).await.ok().flatten();
+    let Some(path) = picked else { return Ok(None) };
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("Couldn't read that file: {e}"))?;
+    let new = tune::Tunes::import(&text)?;
+    let changes = tune::changes(&settings::get().quality.tune, &new);
+    Ok(Some(PresetsFile { path, tune: new, changes }))
+}
+
+/// Replaces every preset's tuning (an imported file, or Reset all).
+#[tauri::command]
+fn presets_apply(app: AppHandle, tune: tune::Tunes) -> SettingsView {
+    settings::update(|s| s.quality.tune = tune);
+    log::info!("presets replaced");
+    settings_view(&app)
+}
+
+/// A file to open (`save`: false) or a name to save as, from the system's own dialog.
+#[cfg(windows)]
+fn pick_file(title: &str, save: bool, name: &str) -> Option<String> {
+    use ::windows::core::{Interface, HSTRING};
+    use ::windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use ::windows::Win32::UI::Shell::{FileOpenDialog, FileSaveDialog, IFileDialog, IFileOpenDialog, IFileSaveDialog, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let result = (|| -> ::windows::core::Result<String> {
+            let dialog: IFileDialog = if save {
+                CoCreateInstance::<_, IFileSaveDialog>(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)?.cast()?
+            } else {
+                CoCreateInstance::<_, IFileOpenDialog>(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?.cast()?
+            };
+            dialog.SetOptions(dialog.GetOptions()? | FOS_FORCEFILESYSTEM)?;
+            dialog.SetTitle(&HSTRING::from(title))?;
+            if save {
+                dialog.SetFileName(&HSTRING::from(name))?;
+                dialog.SetDefaultExtension(&HSTRING::from("json"))?;
+            }
+            dialog.Show(None)?;
+            let item = dialog.GetResult()?;
+            let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+            let text = path.to_string().unwrap_or_default();
+            ::windows::Win32::System::Com::CoTaskMemFree(Some(path.0 as *const _));
+            Ok(text)
+        })();
+        CoUninitialize();
+        result.ok().filter(|p| !p.is_empty())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn pick_file(title: &str, save: bool, name: &str) -> Option<String> {
+    let title = title.replace('"', "");
+    let script = if save {
+        format!("POSIX path of (choose file name with prompt \"{title}\" default name \"{name}\")")
+    } else {
+        format!("POSIX path of (choose file with prompt \"{title}\")")
+    };
+    let out = std::process::Command::new("osascript").args(["-e", &script]).output().ok()?;
+    let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !p.is_empty()).then_some(p)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn pick_file(_title: &str, _save: bool, _name: &str) -> Option<String> {
+    None
+}
+
 /// Opens the folder with Convertino's logs (for reporting a problem).
 #[tauri::command]
 fn open_logs(app: AppHandle) -> Result<(), String> {
@@ -1379,6 +1507,13 @@ pub fn run() {
             wheel_pick,
             wheel_close,
             compress_presets,
+            tune_info,
+            tune_test,
+            tune_test_cancel,
+            tune_pick_file,
+            presets_export,
+            presets_import,
+            presets_apply,
             compress_preview,
             compare_open,
             compare_data,

@@ -53,6 +53,14 @@ Click the tray icon (menu bar on a Mac) for Settings: the optional shortcut, the
 order, quality, and the converters, which download the first time they're needed. On a
 Mac, Settings walks you through the two permissions macOS needs.
 
+Behind each quality preset (Smaller, Balanced, Best) is a **Tune** panel: how close the
+result must look, the lowest quality allowed, PNG effort and removing a photo's GPS
+location; for video, the codec (H.265, H.264 or AV1), the largest size and frame rate
+Compress keeps, audio, graphics card or processor, and encoder effort; for PDFs, how
+closely pages are checked. Each panel can test the preset on a file and open the result
+in Compare, shows how recent compressions with it went, and presets can be exported to a
+file and imported on another computer.
+
 ## Camera RAW photos
 
 DNG, CR2/CR3, NEF, ARW, RAF, ORF, RW2, PEF, SRW and other camera RAW files get their
@@ -76,7 +84,10 @@ convertino formats photo.CR3               what a file can become
 convertino tools                           which converters are ready (tools install --all to fetch them now)
 ```
 
-Options: `--quality small|balanced|best`, `--json` (one JSON result for scripts),
+Options: `--quality small|balanced|best` (as tuned in Settings), one-off preset changes
+with `--look 91`, `--encoder gpu|cpu|auto`, `--max-res 1080`, `--max-fps 60` or
+`--tune look=75,strip-gps,codec=h264,effort=slower`, presets from a file with
+`--presets file.json`, `--json` (one JSON result for scripts),
 `--quiet`. Results go next to the originals (or `--out`); originals are never changed
 and existing files are never overwritten. Exit codes: 0 done, 1 some files failed,
 2 the command was wrong, 130 cancelled with Ctrl+C.
@@ -130,7 +141,7 @@ isn't code-signed yet; see `docs/SIGNING.md`).
 
 ## Making a release (maintainers)
 
-1. Once: double-click **`release-setup.cmd`**. It makes the key that signs updates,
+1. Once: double-click **`more\release-setup.cmd`**. It makes the key that signs updates,
    stores it in `%USERPROFILE%\.convertino` (back that folder up), and gives it to
    GitHub as Actions secrets.
 2. Each release: raise `version` in `src-tauri/tauri.conf.json` (and `package.json`,
@@ -184,7 +195,7 @@ Windows asks for permission once, for the Build Tools. Click **Yes**.
 Progress is written to `setup.log`, and the app's build output to `dev.log`.
 
 After setup, start Convertino any time by double-clicking **`run-dev.cmd`**.
-**`run-tests.cmd`** runs the tests, including real conversions with each tool (output in `test.log`).
+**`run-tests.cmd`** runs the tests, including real conversions with each tool (output in `logs\test.log`).
 **`run-smoke.cmd`** converts every sample in `test-files` to every format its wheel offers, into
 `test-files\results` (summary in `smoke-report.txt` there).
 
@@ -197,7 +208,7 @@ Every push to GitHub builds a Windows installer and two Mac `.dmg`s (Apple silic
 and Intel) for free; download them from the run's **Artifacts** section under
 **Actions**. On Windows, double-click **`publish-github.cmd`** to push (the first
 time it installs the GitHub CLI and asks you to sign in in the browser).
-**`ci-log.cmd`** saves the logs of a failed build to `ci.log`.
+**`ci-log.cmd`** saves the logs of a failed build to `logs\ci.log`.
 
 The Mac builds carry ImageMagick, Poppler and Ghostscript inside the app
 (`ci/bundle-mac-tools.sh` makes them self-contained from Homebrew's builds), and

@@ -15,50 +15,53 @@ use crate::convert::{exec, s, TempDir};
 use crate::tools::{self, Tool};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+pub use crate::tune::Grade;
 
-/// How close to the original a result must look ("Pictures" in Settings).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Level {
-    Small,
-    Balanced,
-    Best,
+/// How close to the original a result must look, and the other choices
+/// behind a preset (Settings › Quality, tuned per preset; see tune.rs).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Level {
+    pub grade: Grade,
+    /// SSIMULACRA2 score a picture (or a PDF page) must reach.
+    pub target: f64,
+    /// Lowest JPG/WebP quality searched (AVIF: 10 lower).
+    pub floor: u32,
+    /// oxipng preset.
+    pub png: u8,
+    /// Remove GPS location from the results' EXIF.
+    pub strip_gps: bool,
+    /// PDF Compress: pages are compared at this DPI.
+    pub check_dpi: u32,
 }
 
+#[allow(non_upper_case_globals)]
 impl Level {
-    /// None for "fixed" (use the quality numbers from Settings as they are).
-    pub fn from_setting(s: &str) -> Option<Level> {
-        match s {
-            "small" => Some(Level::Small),
-            "best" => Some(Level::Best),
-            "fixed" => None,
-            _ => Some(Level::Balanced),
-        }
+    /// The presets as Convertino ships them.
+    #[cfg(test)]
+    pub const Small: Level = Level { grade: Grade::Small, target: 70.0, floor: 40, png: 2, strip_gps: false, check_dpi: 110 };
+    pub const Balanced: Level = Level { grade: Grade::Balanced, target: 80.0, floor: 40, png: 2, strip_gps: false, check_dpi: 110 };
+    pub const Best: Level = Level { grade: Grade::Best, target: 87.0, floor: 40, png: 4, strip_gps: false, check_dpi: 150 };
+
+    /// A picture preset as tuned in `q`.
+    pub fn image(q: &crate::settings::Quality, g: Grade) -> Level {
+        let i = q.tune.image(g);
+        Level { grade: g, target: i.look, floor: i.floor, png: i.png, strip_gps: i.strip_gps, check_dpi: 110 }
+    }
+
+    /// A PDF Compress preset as tuned in `q` (pictures inside keep their GPS).
+    pub fn pdf(q: &crate::settings::Quality, g: Grade) -> Level {
+        let p = q.tune.pdf(g);
+        let png = q.tune.image(g).png;
+        Level { grade: g, target: p.look, floor: 40, png, strip_gps: false, check_dpi: p.check_dpi }
     }
 
     /// SSIMULACRA2 score a picture must reach.
     pub fn picture_target(self) -> f64 {
-        match self {
-            Level::Small => 70.0,
-            Level::Balanced => 80.0,
-            Level::Best => 87.0,
-        }
+        self.target
     }
 
-    /// VMAF score a video must reach (0–100; 93+ is hard to tell from the source).
-    pub fn vmaf_target(self) -> f64 {
-        match self {
-            Level::Small => 89.0,
-            Level::Balanced => 93.0,
-            Level::Best => 95.5,
-        }
-    }
-
-    /// oxipng preset: more effort for "best".
     fn png_preset(self) -> u8 {
-        match self {
-            Level::Small | Level::Balanced => 2,
-            Level::Best => 4,
-        }
+        self.png
     }
 }
 
@@ -177,10 +180,14 @@ impl Lossy {
 
     /// Lowest and highest quality searched.
     fn range(self) -> (u32, u32) {
+        self.range_from(40)
+    }
+
+    /// The range with the lowest quality from a preset (AVIF's scale sits 10 lower).
+    fn range_from(self, floor: u32) -> (u32, u32) {
         match self {
-            Lossy::Jpg => (40, 95),
-            Lossy::Webp => (40, 95),
-            Lossy::Avif => (30, 90),
+            Lossy::Jpg | Lossy::Webp => (floor.clamp(10, 90), 95),
+            Lossy::Avif => (floor.saturating_sub(10).clamp(10, 85), 90),
         }
     }
 
@@ -213,13 +220,13 @@ fn trial(src: &Path, format: Lossy, quality: u32, dir: &Path) -> Result<(Pixels,
 
 /// The lowest quality whose result scores at least `target` against `reference`
 /// (a lossless PNG), found by bisection. Falls back to the top of the range.
-pub fn search_quality(reference: &Path, format: Lossy, target: f64) -> Result<u32, String> {
+pub fn search_quality(reference: &Path, format: Lossy, target: f64, floor: u32) -> Result<u32, String> {
     let original = decode(reference, &[])?;
     if original.width < 8 || original.height < 8 {
         return Ok(format.range().1);
     }
     let tmp = TempDir::new("look")?;
-    let (mut lo, mut hi) = format.range();
+    let (mut lo, mut hi) = format.range_from(floor);
     // `hi` is known good only once tested.
     let (top, _) = trial(reference, format, hi, &tmp.0)?;
     let top_score = score(&original, &top);
@@ -268,7 +275,7 @@ pub fn picture(input: &Path, prep: &[String], format: Lossy, level: Option<Level
         Some(level) => {
             let tmp = TempDir::new("pic")?;
             let crop = search_crop(input, prep, &tmp.0)?;
-            search_quality(&crop, format, level.picture_target())?
+            search_quality(&crop, format, level.picture_target(), level.floor)?
         }
         None => fixed,
     };
@@ -278,6 +285,26 @@ pub fn picture(input: &Path, prep: &[String], format: Lossy, level: Option<Level
     cmd.arg(src).arg("-auto-orient").args(prep).args(format.args(quality)).arg(output);
     exec(Tool::Magick, cmd)?;
     Ok(quality)
+}
+
+/// Removes the GPS location from a picture's EXIF (JPG, WebP, PNG, TIFF…);
+/// the rest (camera, date, orientation) stays. Pictures without EXIF, or
+/// that little_exif can't read, are left as they are.
+pub fn strip_gps(path: &Path) {
+    use little_exif::ifd::ExifTagGroup;
+    let Ok(mut md) = little_exif::metadata::Metadata::new_from_path(path) else { return };
+    let mut removed = 0;
+    // GPS tags are numbered 0x00–0x1f in their own directory.
+    for hex in 0u16..=0x1f {
+        removed += md.remove_tag_by_hex_group(hex, ExifTagGroup::GPS);
+    }
+    if removed == 0 {
+        return;
+    }
+    match md.write_to_file(path) {
+        Ok(()) => log::info!("removed the GPS location from {}", path.display()),
+        Err(e) => log::warn!("couldn't remove the GPS location from {}: {e}", path.display()),
+    }
 }
 
 /// Makes a PNG smaller without changing any pixel. Failures keep the PNG as it is.
@@ -389,8 +416,10 @@ mod tests {
 
     #[test]
     fn levels() {
-        assert_eq!(Level::from_setting("fixed"), None);
-        assert_eq!(Level::from_setting("nonsense"), Some(Level::Balanced));
+        let mut q = crate::settings::Quality { image: "fixed".into(), ..Default::default() };
+        assert_eq!(q.image_level(), None);
+        q.image = "nonsense".into();
+        assert_eq!(q.image_level(), Some(Level::Balanced));
         assert!(Level::Best.picture_target() > Level::Small.picture_target());
         assert_eq!(sample_pages(1), vec![1]);
         assert_eq!(sample_pages(2), vec![1, 2]);
@@ -440,5 +469,36 @@ mod tests {
         shrink_png(&png, Some(Level::Balanced));
         assert!(png.metadata().unwrap().len() < before);
         assert_eq!(decode(&png, &[]).unwrap().rgb, before_px.rgb);
+    }
+
+    /// "Remove location (GPS)": the GPS tags go, the camera details stay.
+    #[test]
+    fn gps_is_removed_and_the_rest_kept() {
+        use little_exif::exif_tag::ExifTag;
+        use little_exif::rational::uR64;
+        let Some(im) = tools::find(Tool::Magick) else { return };
+        let d = tmpdir("gps");
+        let jpg = d.join("trip.jpg");
+        assert!(tools::command(&im).args(["-size", "300x200", "plasma:"]).arg(&jpg).status().unwrap().success());
+        let mut md = little_exif::metadata::Metadata::new();
+        md.set_tag(ExifTag::Make("Convertino Cam".into()));
+        md.set_tag(ExifTag::GPSLatitudeRef("N".into()));
+        md.set_tag(ExifTag::GPSLatitude(vec![uR64 { nominator: 26, denominator: 1 }, uR64 { nominator: 27, denominator: 1 }, uR64 { nominator: 0, denominator: 1 }]));
+        md.write_to_file(&jpg).unwrap();
+        let has_gps = |p: &Path| {
+            let md = little_exif::metadata::Metadata::new_from_path(p).unwrap();
+            let gps = md.get_tag(&ExifTag::GPSLatitude(Vec::new())).next().is_some();
+            let make = md.get_tag(&ExifTag::Make(String::new())).next().is_some();
+            (gps, make)
+        };
+        assert_eq!(has_gps(&jpg), (true, true));
+        strip_gps(&jpg);
+        assert_eq!(has_gps(&jpg), (false, true));
+        // A picture without EXIF is left alone.
+        let plain = d.join("plain.png");
+        assert!(tools::command(&im).args(["-size", "20x20", "xc:red"]).arg(&plain).status().unwrap().success());
+        let before = std::fs::read(&plain).unwrap();
+        strip_gps(&plain);
+        assert_eq!(std::fs::read(&plain).unwrap(), before);
     }
 }

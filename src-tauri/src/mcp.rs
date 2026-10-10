@@ -87,7 +87,8 @@ Several files of the same kind are converted together (merge needs two or more P
                 "properties": {
                     "paths": paths_schema(),
                     "to": { "type": "string", "description": "A name from list_conversions, e.g. jpg, png, webp, pdf, mp3, mp4, docx, xlsx, json, zip, compress, split, merge, extract, 720p, camera-jpg." },
-                    "quality": { "type": "string", "enum": ["small", "balanced", "best"], "description": "Optional. Default: as set in Convertino. balanced = looks the same as the original." },
+                    "quality": { "type": ["string", "number"], "description": "Optional. small, balanced or best (as tuned in Convertino; default: as set there; balanced = looks the same as the original), or a number: how close the result must look, on the preset's own score (pictures and PDFs about 70–87, video about 89–96)." },
+                    "tune": { "type": "object", "description": "Optional one-off preset settings for this job: look (number), floor (30–90), png (quick|normal|thorough), stripGps (true removes the photo's GPS location), codec (h265|h264|av1), maxRes (2160|1440|1080|720|0), maxFps (60|30|0), audio (96|128|192), encoder (gpu|cpu|auto), effort (faster|medium|slower), recheck (1–20), checkDpi (110|150|200).", "additionalProperties": true },
                     "outFolder": { "type": "string", "description": "Optional absolute folder to save into instead of next to the originals." }
                 },
                 "required": ["paths", "to"]
@@ -264,10 +265,38 @@ fn convert_tool(args: &Value, ctx: &Ctx, size: Option<size::Ask>) -> ToolResult 
     if to.is_empty() {
         return ToolResult::fail("`to` is missing. Call list_conversions to see the names, e.g. jpg, mp3, pdf.");
     }
-    let quality = match args.get("quality").and_then(Value::as_str) {
-        None => None,
-        Some(q @ ("small" | "balanced" | "best")) => Some(q.to_string()),
-        Some(q) => return ToolResult::fail(format!("quality is small, balanced or best, not \"{q}\".")),
+    let mut tune: Vec<(String, String)> = Vec::new();
+    let quality = match args.get("quality") {
+        None | Some(Value::Null) => None,
+        Some(Value::Number(n)) => {
+            tune.push(("look".into(), n.to_string()));
+            None
+        }
+        Some(Value::String(q)) => match q.as_str() {
+            "small" | "balanced" | "best" => Some(q.to_string()),
+            other if other.parse::<f64>().is_ok() => {
+                tune.push(("look".into(), other.to_string()));
+                None
+            }
+            other => return ToolResult::fail(format!("quality is small, balanced, best or a number, not \"{other}\".")),
+        },
+        Some(other) => return ToolResult::fail(format!("quality is small, balanced, best or a number, not {other}.")),
+    };
+    if let Some(obj) = args.get("tune").and_then(Value::as_object) {
+        for (k, v) in obj {
+            // camelCase keys from JSON (maxRes) → the command line's (max-res).
+            let key: String = k.chars().flat_map(|c| if c.is_ascii_uppercase() { vec!['-', c.to_ascii_lowercase()] } else { vec![c] }).collect();
+            let val = match v {
+                Value::String(s) => s.clone(),
+                Value::Bool(b) => b.to_string(),
+                other => other.to_string(),
+            };
+            tune.push((key, val));
+        }
+    }
+    let quality_set = match cli::quality_with(quality.as_deref(), None, &tune) {
+        Ok(q) => q,
+        Err(e) => return ToolResult::fail(e),
     };
     let (groups, skipped) = cli::group(&files, &to);
     if groups.is_empty() {
@@ -303,7 +332,7 @@ fn convert_tool(args: &Value, ctx: &Ctx, size: Option<size::Ask>) -> ToolResult 
         let req = Request {
             target_id: g.target_id.clone(),
             files: g.files.clone(),
-            quality: cli::quality_for(quality.as_deref()),
+            quality: quality_set.clone(),
             size,
             out_dir: out_dir.clone(),
         };

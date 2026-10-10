@@ -4,10 +4,10 @@ src-tauri/gen/schemas/
 .DS_Store
 Thumbs.db
 *.log
+logs/
 src-tauri/tools/
 test-files/
 .sync/
-checks.done
 .sync*/
 mac-check.cmd
 scripts/mac-check.ps1
@@ -17,13 +17,7 @@ docs/STATUS.md
 docs/BUILD-PLAN.md
 docs/PLAN-RAW-CLI-MCP.md
 docs/*mockup*.html
-stats-dump.cmd
+more/stats-dump.cmd
 scripts/stats-dump.ps1
-stats-own.cmd
+more/stats-own.cmd
 _to_delete/
-
-# local speed checks
-bench-compress.cmd
-try-compress-fix.cmd
-scripts/bench-compress.ps1
-scripts/try-compress-fix.ps1

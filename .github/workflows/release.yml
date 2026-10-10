@@ -1,7 +1,7 @@
 # Publishes a release when a version tag is pushed (release.cmd does that, and
 # only after the Build run for that commit passed on all three machines).
 # Build already made the installers and signed them for the updater
-# (TAURI_SIGNING_PRIVATE_KEY, set up once by release-setup.cmd), so nothing is
+# (TAURI_SIGNING_PRIVATE_KEY, set up once by more\release-setup.cmd), so nothing is
 # built again here: the passed Build run's installers are published as they
 # are, with latest.json, which installed copies read to update themselves.
 # (Until 0.2.4 tauri-action built everything a second time: ~20 min.)

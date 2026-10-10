@@ -156,6 +156,8 @@ pub struct WheelModel {
     pub ring: bool,
     pub handoff_ms: u64,
     pub quality: Quality,
+    /// Every preset as tuned, for Shift+click's Tune (see tune::resolved_json).
+    pub presets: serde_json::Value,
     /// A Save dialog whose file the conversion waits for (see selection::Selection).
     #[serde(skip)]
     pub pending_dialog: Option<isize>,
@@ -385,6 +387,7 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         ring: prefs.progress_ring,
         handoff_ms: prefs.handoff_seconds as u64 * 1000,
         quality: prefs.quality.clone(),
+        presets: crate::tune::resolved_json(&prefs.quality.tune),
         pending_dialog: None,
         ask: None,
         selected: paths.to_vec(),

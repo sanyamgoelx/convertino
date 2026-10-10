@@ -6,7 +6,7 @@
 $ErrorActionPreference = "Continue"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$log = Join-Path (Get-Location) "release-setup.log"
+$log = Join-Path (Get-Location) "logs\release-setup.log"
 function Say($m) { Write-Host $m; Add-Content -Path $log -Value $m -Encoding utf8 }
 "Convertino release setup $(Get-Date -Format s)" | Set-Content -Path $log -Encoding utf8
 

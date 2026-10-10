@@ -1,7 +1,7 @@
 # Converts every sample in test-files the way the wheel would, into test-files\results.
-# The summary is test-files\results\smoke-report.txt (also mirrored to smoke.log).
+# The summary is test-files\results\smoke-report.txt (also mirrored to logs\smoke.log).
 $root = Split-Path -Parent $PSScriptRoot
-$log = Join-Path $root 'smoke.log'
+$log = Join-Path $root 'logs\smoke.log'
 $env:CONVERTINO_SMOKE_DIR = Join-Path $root 'test-files'
 Set-Location (Join-Path $root 'src-tauri')
 Set-Content -Path $log -Value "Convertino smoke run $(Get-Date -Format s)" -Encoding UTF8

@@ -3,7 +3,7 @@
 $ErrorActionPreference = "Continue"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$log = Join-Path (Get-Location) "release.log"
+$log = Join-Path (Get-Location) "logs\release.log"
 function Say($m) { Write-Host $m; Add-Content -Path $log -Value $m -Encoding utf8 }
 "Convertino release $(Get-Date -Format s)" | Set-Content -Path $log -Encoding utf8
 $env:GIT_TERMINAL_PROMPT = "0"

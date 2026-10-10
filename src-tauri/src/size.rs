@@ -833,7 +833,7 @@ pub struct Planned {
 }
 
 /// Steps for a size job. Files already small enough get a note instead of a step.
-pub fn plan(kind: Kind, files: &[PathBuf], ask: Option<Ask>) -> Result<Planned, String> {
+pub fn plan(kind: Kind, files: &[PathBuf], ask: Option<Ask>, q: &crate::settings::Quality) -> Result<Planned, String> {
     let infos: Vec<Info> = files.iter().map(|f| info(kind, f)).collect::<Result<_, _>>()?;
     let targets: Vec<Option<u64>> = match ask {
         None => infos.iter().map(|_| Some(u64::MAX)).collect(),
@@ -861,7 +861,7 @@ pub fn plan(kind: Kind, files: &[PathBuf], ask: Option<Ask>) -> Result<Planned, 
             (None, _) => format!("{stem} (compressed)"),
         };
         let bytes = if t == u64::MAX { None } else { Some(t) };
-        steps.push(Step { inputs: vec![i.path.clone()], dir, stem, ext, folder: false, op: Op::ToSize { kind, bytes, trim: ask.and_then(|a| a.trim) } });
+        steps.push(Step { inputs: vec![i.path.clone()], dir, stem, ext, folder: false, op: Op::ToSize { kind, bytes, trim: ask.and_then(|a| a.trim), quality: Box::new(q.clone()) } });
     }
     if steps.is_empty() {
         let what = if infos.len() == 1 { format!("{} is already {}", infos[0].name(), words(infos[0].bytes)) } else { format!("All {} are already small enough", kind.noun(infos.len())) };
@@ -876,21 +876,25 @@ pub const ALREADY: &str = "Already small enough: ";
 // ---------------------------------------------------------------------------
 // Running
 
-pub fn run(kind: Kind, input: &Path, bytes: Option<u64>, trim: Option<f64>, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String> {
+pub fn run(kind: Kind, input: &Path, bytes: Option<u64>, trim: Option<f64>, q: &crate::settings::Quality, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String> {
     match kind {
-        Kind::Image => picture_to(input, bytes, output, progress).map(|_| output.to_path_buf()),
+        Kind::Image => {
+            // "Fixed" has no look to aim for: Compress then uses Balanced.
+            let level = q.image_level().unwrap_or_else(|| look::Level::image(q, crate::tune::Grade::Balanced));
+            picture_to(input, bytes, level, output, progress).map(|_| output.to_path_buf())
+        }
         Kind::Video => {
             let i = info(kind, input)?;
             match bytes {
-                None => video::run(input, video::Job::Compress, &video::Opts::from_quality(&crate::settings::get().quality), output, progress),
+                None => video::run(input, video::Job::Compress, &video::Opts::from_quality(q), output, progress),
                 Some(b) => {
                     let plan = video_plan(&i, b, trim).ok_or_else(|| too_small(kind, &i, b))?;
-                    video::run_to_size(input, &i, &plan, b, trim, output, progress)?;
+                    video::run_to_size(input, &i, &plan, b, trim, &video::Opts::from_quality(q), output, progress)?;
                     Ok(output.to_path_buf())
                 }
             }
         }
-        Kind::Pdf => convert::pdf_to_size(input, bytes, output, progress).map(|_| output.to_path_buf()),
+        Kind::Pdf => convert::pdf_to_size(input, bytes, q.pdf_level(), output, progress).map(|_| output.to_path_buf()),
         Kind::Audio => audio_to(input, bytes, output, progress).map(|_| output.to_path_buf()),
     }
 }
@@ -910,7 +914,7 @@ fn quality_floor(f: Lossy) -> u32 {
 
 /// A transparent picture stays PNG: lossless and smaller first, then 256
 /// colours (dithered, like pngquant), then smaller pictures at 256 colours.
-fn png_to(input: &Path, i: &Info, target: Option<u64>, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
+fn png_to(input: &Path, i: &Info, target: Option<u64>, level: look::Level, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
     let tmp = TempDir::new("sizepng")?;
     let make = |side: Option<u32>, colours: bool, tag: &str| -> Result<(PathBuf, u64), String> {
         let out = tmp.0.join(format!("{tag}.png"));
@@ -926,7 +930,7 @@ fn png_to(input: &Path, i: &Info, target: Option<u64>, output: &Path, progress: 
         }
         cmd.args(["-define", "png:compression-level=9"]).arg(&out);
         convert::exec(Tool::Magick, cmd)?;
-        look::shrink_png(&out, Some(look::Level::Best));
+        look::shrink_png(&out, Some(look::Level { png: level.png.max(look::Level::Best.png), ..level }));
         let size = out.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
         Ok((out, size))
     };
@@ -962,15 +966,15 @@ fn png_to(input: &Path, i: &Info, target: Option<u64>, output: &Path, progress: 
 }
 const QUALITY_LOWEST: u32 = 30;
 
-fn picture_to(input: &Path, target: Option<u64>, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
+fn picture_to(input: &Path, target: Option<u64>, level: look::Level, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<(), String> {
     let i = info(Kind::Image, input)?;
     let pic = picture_format(&i);
-    let Some(fmt) = pic.lossy() else { return png_to(input, &i, target, output, progress) };
+    let Some(fmt) = pic.lossy() else { return png_to(input, &i, target, level, output, progress) };
     let flatten = || if fmt == Lossy::Jpg { s(&["-background", "white", "-alpha", "remove", "-alpha", "off"]) } else { Vec::new() };
     let tmp = TempDir::new("size")?;
     // 1. The smallest file that still looks the same, at full size.
     let crop = look::search_crop(input, &flatten(), &tmp.0)?;
-    let same_q = look::search_quality(&crop, fmt, look::Level::Balanced.picture_target())?;
+    let same_q = look::search_quality(&crop, fmt, level.picture_target(), level.floor)?;
     progress(0.25);
     let full = prepare(input, &flatten(), None, &tmp.0, "full")?;
     let at = |src: &Path, q: u32, tag: &str| -> Result<(PathBuf, u64), String> {
@@ -1205,7 +1209,7 @@ mod tests {
     }
 
     fn run_plan(kind: Kind, file: &Path, ask: Ask) -> PathBuf {
-        let planned = plan(kind, &[file.to_path_buf()], Some(ask)).unwrap();
+        let planned = plan(kind, &[file.to_path_buf()], Some(ask), &crate::settings::Quality::default()).unwrap();
         convert::run(&planned.steps[0], &mut |_| {}).unwrap()
     }
 
@@ -1306,7 +1310,7 @@ mod tests {
         let d = tmpdir("fits");
         let f = d.join("tiny.pdf");
         std::fs::write(&f, b"%PDF-1.4 tiny").unwrap();
-        let e = plan(Kind::Pdf, &[f], Some(Ask { bytes: MB, together: false, trim: None })).err().unwrap();
+        let e = plan(Kind::Pdf, &[f], Some(Ask { bytes: MB, together: false, trim: None }), &crate::settings::Quality::default()).err().unwrap();
         assert!(e.starts_with(ALREADY));
     }
 }

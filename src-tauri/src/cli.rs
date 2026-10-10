@@ -55,7 +55,16 @@ Options:
                        720p, frames, extract, … (see `convertino formats <file>`)
   --size <size>        target size for Compress, in decimal units (10MB = 10,000,000 bytes)
   --together           with --size and several files: the size is for all of them together
-  --quality <q>        small, balanced or best (default: as in Convertino Settings)
+  --quality <q>        small, balanced or best (default: as in Convertino Settings),
+                       as tuned in Settings › Quality
+  --look <n>           how close it must look, for this run only (the preset's own
+                       score: pictures and PDFs about 70–87, video about 89–96)
+  --encoder <e>        video: gpu (graphics card), cpu (smaller files) or auto
+  --max-res <p>        video Compress: at most 2160, 1440, 1080 or 720 (or keep)
+  --max-fps <n>        video Compress: at most 60 or 30 frames per second (or keep)
+  --tune <list>        any preset setting for this run: look=75,floor=50,png=thorough,
+                       strip-gps,codec=h264,audio=96,effort=slower,recheck=1,check-dpi=150
+  --presets <file>     use presets exported from Settings › Quality instead
   --out <folder>       save there instead of next to the originals
   --json               print the result as JSON
   --progress           progress as JSON lines on stderr, for apps that run Convertino
@@ -73,6 +82,10 @@ pub struct ConvertArgs {
     pub size: Option<u64>,
     pub together: bool,
     pub quality: Option<String>,
+    /// One-off preset changes (--look, --encoder, --max-res, --max-fps, --tune).
+    pub tune: Vec<(String, String)>,
+    /// Exported presets to use instead of the ones in Settings.
+    pub presets: Option<PathBuf>,
     pub out: Option<PathBuf>,
     pub json: bool,
     pub progress: bool,
@@ -178,6 +191,17 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 }
                 c.quality = Some(if q == "smaller" { "small".into() } else { q });
             }
+            "--look" => c.tune.push(("look".into(), take(&mut i, "--look")?)),
+            "--encoder" => c.tune.push(("encoder".into(), take(&mut i, "--encoder")?)),
+            "--max-res" => c.tune.push(("max-res".into(), take(&mut i, "--max-res")?)),
+            "--max-fps" => c.tune.push(("max-fps".into(), take(&mut i, "--max-fps")?)),
+            "--tune" => {
+                for part in take(&mut i, "--tune")?.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+                    let (k, v) = part.split_once('=').unwrap_or((part, "on"));
+                    c.tune.push((k.trim().to_string(), v.trim().to_string()));
+                }
+            }
+            "--presets" => c.presets = Some(PathBuf::from(take(&mut i, "--presets")?)),
             "--out" | "-o" => c.out = Some(PathBuf::from(take(&mut i, "--out")?)),
             "--together" => c.together = true,
             "--json" => c.json = true,
@@ -223,6 +247,8 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             if c.together && c.size.is_none() {
                 return Err(usage("--together needs --size."));
             }
+            // Check the preset changes now, so a typo is a usage error.
+            quality_with(None, None, &c.tune).map_err(usage)?;
             c.files = expand(&rest)?;
             Ok(Command::Convert(c))
         }
@@ -349,6 +375,49 @@ pub(crate) fn quality_for(word: Option<&str>) -> Option<settings::Quality> {
     q.video = w.to_string();
     q.pdf_compress = if w == "best" { "high".into() } else { w.to_string() };
     Some(q)
+}
+
+/// The quality for a run: the preset `word` (else Settings'), presets from
+/// a file instead of Settings' tuning, and one-off changes on top, applied to
+/// the preset each kind of file uses. None: Settings as they are.
+pub(crate) fn quality_with(word: Option<&str>, presets: Option<&Path>, tune: &[(String, String)]) -> Result<Option<settings::Quality>, String> {
+    if word.is_none() && presets.is_none() && tune.is_empty() {
+        return Ok(None);
+    }
+    let mut q = quality_for(word).unwrap_or_else(|| settings::get().quality);
+    if let Some(file) = presets {
+        let text = std::fs::read_to_string(file).map_err(|e| format!("Couldn't read {}: {e}", file.display()))?;
+        q.tune = crate::tune::Tunes::import(&text)?;
+    }
+    let mut grades = vec![crate::tune::Grade::from_word(&q.image), crate::tune::Grade::from_word(&q.video), crate::tune::Grade::from_word(&q.pdf_compress)];
+    grades.dedup();
+    for (k, v) in tune {
+        for g in &grades {
+            q.tune.apply(*g, k, v)?;
+        }
+    }
+    // Ranges as in Settings, but a one-off look may pass the neighbouring preset's.
+    let order_free = q.tune.clone();
+    q = q.clamped();
+    for g in &grades {
+        for kind in ["image", "video", "pdf"] {
+            let wanted = match kind {
+                "image" => order_free.image.get(*g).look,
+                "video" => order_free.video.get(*g).look,
+                _ => order_free.pdf.get(*g).look,
+            };
+            if let Some(l) = wanted {
+                let (lo, hi) = if kind == "video" { crate::tune::VIDEO_LOOK } else { crate::tune::IMAGE_LOOK };
+                let l = Some(l.clamp(lo, hi));
+                match kind {
+                    "image" => q.tune.image.get_mut(*g).look = l,
+                    "video" => q.tune.video.get_mut(*g).look = l,
+                    _ => q.tune.pdf.get_mut(*g).look = l,
+                }
+            }
+        }
+    }
+    Ok(Some(q))
 }
 
 // ---------- output ----------
@@ -538,6 +607,14 @@ pub fn run_convert(c: &ConvertArgs) -> i32 {
         }
     }
 
+    let quality = match quality_with(c.quality.as_deref(), c.presets.as_deref(), &c.tune) {
+        Ok(q) => q,
+        Err(e) => {
+            errln!("{} {e}", style.red("✗"));
+            return EXIT_USAGE;
+        }
+    };
+
     let mut outputs = Vec::new();
     let mut failed: Vec<(PathBuf, String)> = skipped.clone();
     let mut notes = Vec::new();
@@ -558,7 +635,7 @@ pub fn run_convert(c: &ConvertArgs) -> i32 {
         let req = Request {
             target_id: g.target_id.clone(),
             files: g.files.clone(),
-            quality: quality_for(c.quality.as_deref()),
+            quality: quality.clone(),
             size: c.size.map(|bytes| size::Ask { bytes, together: c.together, trim: None }),
             out_dir: c.out.clone(),
         };
@@ -880,6 +957,31 @@ mod tests {
         assert!(c.progress && c.json);
         let Command::Convert(c) = parse(&args(&[&a, "--to", "compress"])).unwrap() else { panic!() };
         assert!(!c.progress);
+    }
+
+    #[test]
+    fn preset_flags() {
+        let d = tmp_dir("tuneflags");
+        let a = touch(&d, "clip.mp4");
+        let Command::Convert(c) = parse(&args(&[&a, "--to", "compress", "--quality", "balanced", "--look", "91", "--encoder", "cpu", "--max-res", "1080", "--max-fps=60", "--tune", "strip-gps,effort=slower"])).unwrap() else { panic!() };
+        assert_eq!(c.tune.len(), 6);
+        let q = quality_with(c.quality.as_deref(), None, &c.tune).unwrap().unwrap();
+        let v = q.tune.video(crate::tune::Grade::Balanced);
+        assert_eq!((v.look, v.encoder, v.max_res, v.max_fps, v.effort), (91.0, crate::tune::Encoder::Cpu, 1080, 60, 2));
+        assert!(q.tune.image(crate::tune::Grade::Balanced).strip_gps);
+        // A one-off look may pass the next preset's (Best is 95.5 by default).
+        let q = quality_with(Some("balanced"), None, &[("look".into(), "97".into())]).unwrap().unwrap();
+        assert_eq!(q.tune.video(crate::tune::Grade::Balanced).look, 97.0);
+        assert!(parse(&args(&[&a, "--to", "compress", "--encoder", "quantum"])).is_err());
+        assert!(parse(&args(&[&a, "--to", "compress", "--tune", "colour=red"])).is_err());
+        assert_eq!(quality_with(None, None, &[]).unwrap(), None, "no flags: Settings as they are");
+        // Presets from a file.
+        let mut t = crate::tune::Tunes::default();
+        t.video.best.look = Some(98.0);
+        let f = d.join("p.json");
+        std::fs::write(&f, t.export().to_string()).unwrap();
+        let q = quality_with(Some("best"), Some(&f), &[]).unwrap().unwrap();
+        assert_eq!(q.tune.video(crate::tune::Grade::Best).look, 98.0);
     }
 
     #[test]
