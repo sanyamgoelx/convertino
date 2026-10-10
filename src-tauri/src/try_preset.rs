@@ -81,12 +81,20 @@ fn run_inner(id: u64, kind: &str, grade: &str, q: &Quality, file: &Path) -> Resu
             q.video = g.word().into();
             let opts = crate::video::Opts::from_quality(&q);
             let t = crate::video::test_compress(file, &opts, &dir, &mut |_| {})?;
-            let knob = if t.encoder.contains("nvenc") { "CQ" } else if t.encoder.contains("qsv") || t.encoder.contains("amf") { "QP" } else { "CRF" };
-            let short = t.encoder.trim_start_matches("lib").split('_').next().unwrap_or(t.encoder).to_string();
-            let short = if t.encoder.contains("nvenc") { format!("{} (NVIDIA)", short.to_uppercase()) } else { short };
+            // "H.265 on the graphics card, level 27" (the encoder's quality number; lower looks better).
+            let codec = if t.encoder.contains("265") || t.encoder.starts_with("hevc") {
+                "H.265"
+            } else if t.encoder.contains("av1") {
+                "AV1"
+            } else if t.encoder.contains("vp9") {
+                "VP9"
+            } else {
+                "H.264"
+            };
+            let on = if t.encoder.starts_with("lib") { "the processor" } else { "the graphics card" };
             crate::compare::set_offset(&t.clip, t.clip_start);
             let compare = crate::jobs::register_compare(vec![(file.to_path_buf(), t.clip.clone())]);
-            Ok(Outcome { name, ratio: t.ratio, score: Some(t.score), target: t.target, setting: format!("{short} {knob} {}", t.value), seconds: t.estimate, estimate: true, compare })
+            Ok(Outcome { name, ratio: t.ratio, score: Some(t.score), target: t.target, setting: format!("{codec} on {on}, level {}", t.value), seconds: t.estimate, estimate: true, compare })
         }
         "image" | "pdf" => {
             let size_kind = if kind == "image" { Kind::Image } else { Kind::Pdf };
@@ -103,10 +111,10 @@ fn run_inner(id: u64, kind: &str, grade: &str, q: &Quality, file: &Path) -> Resu
             let (score, target, setting) = if kind == "image" {
                 let level = q.image_level().unwrap_or_else(|| crate::look::Level::image(&q, g));
                 let ext = made.extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
-                (picture_score(file, &made, &dir), level.target, ext)
+                (picture_score(file, &made, &dir), level.target, format!("Saved as {ext}"))
             } else {
                 let level = q.pdf_level();
-                (None, level.target, format!("Pages checked at {} DPI", level.check_dpi))
+                (None, level.target, format!("Pages compared at {} detail", match level.check_dpi { 0..=120 => "normal", 121..=170 => "fine", _ => "finest" }))
             };
             let compare = crate::jobs::register_compare(vec![(file.to_path_buf(), made)]);
             Ok(Outcome { name, ratio: after as f64 / before as f64, score, target, setting, seconds: started.elapsed().as_secs_f64(), estimate: false, compare })

@@ -18,23 +18,23 @@ const OK = "M5 12.5l4.5 4.5L19 7.5";
 const QDEFAULT = { jpg: 90, webp: 85, resize: 1920, convertMax: 0, dpi: 150, pdfCompress: "balanced", mp3: 320, video: "balanced", gifWidth: 480, gifSeconds: 30, image: "balanced" };
 const QGROUPS = [
   { title: "Images", rows: [
-    { k: "image", tune: "image", label: "File size", desc: "Convertino tries a few settings and keeps the smallest file that still looks like the original. Also used for PDF pages, Compress and re-encoded video", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"], ["fixed", "Fixed (use the numbers below)"]] },
-    { k: "jpg", label: "JPG quality", desc: "Only when File size is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
-    { k: "webp", label: "WebP quality", desc: "Only when File size is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
-    { k: "convertMax", label: "Size when converting", desc: "Bigger pictures are scaled down; smaller ones are left as they are",
-      options: [[0, "Keep the size"], [3840, "Longest side 3840 px"], [2560, "Longest side 2560 px"], [1920, "Longest side 1920 px"], [1280, "Longest side 1280 px"]] },
+    { k: "image", tune: "image", label: "Picture quality", desc: "Convertino tries a few settings and keeps the smallest file that still looks like the original. Also used for PDF pages and Compress", options: [["small", "Smaller: looks very close"], ["balanced", "Balanced: looks the same (recommended)"], ["best", "Best: the same, even side by side"], ["fixed", "Fixed: use the numbers below"]] },
+    { k: "jpg", label: "Fixed JPG quality", desc: "Only when Picture quality is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
+    { k: "webp", label: "Fixed WebP quality", desc: "Only when Picture quality is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
+    { k: "convertMax", label: "Resize large pictures", desc: "When converting: bigger pictures are scaled down, smaller ones are left as they are",
+      options: [[0, "Don't resize"], [3840, "Up to 3840 px"], [2560, "Up to 2560 px"], [1920, "Up to 1920 px"], [1280, "Up to 1280 px"]] },
   ] },
   { title: "PDF", rows: [
-    { k: "dpi", label: "Page images", desc: "Resolution of JPG, PNG and WebP pages", options: [[72, "Screen (72 DPI)"], [150, "Standard (150 DPI)"], [300, "Print (300 DPI)"]] },
-    { k: "pdfCompress", tune: "pdf", label: "Compress", desc: "For the size ring's top choice: how close the compressed PDF must look to the original; the smallest version that does is kept", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["high", "Best quality"]] },
+    { k: "dpi", label: "Page picture resolution", desc: "When turning PDF pages into JPG, PNG or WebP", options: [[72, "Screen (72 DPI)"], [150, "Standard (150 DPI)"], [300, "Print (300 DPI)"]] },
+    { k: "pdfCompress", tune: "pdf", label: "PDF compression", desc: "How close a compressed PDF must look to the original; the smallest version that does is kept", options: [["small", "Smaller: looks very close"], ["balanced", "Balanced: looks the same (recommended)"], ["high", "Best: the same, even side by side"]] },
   ] },
   { title: "Audio", rows: [
     { k: "mp3", label: "MP3 quality", desc: "Variable bitrate: quiet and simple parts take less space. Never more than a lossy original had. Also used when pulling audio out of video", options: [[128, "About 130 kbps"], [160, "About 165 kbps"], [192, "About 190 kbps"], [320, "Highest (about 245 kbps)"]] },
   ] },
   { title: "Video", rows: [
-    { k: "video", tune: "video", label: "Re-encoded video", desc: "MP4, MOV, WebM, 720p and Compress. Short samples are measured first, so the whole video gets the smallest setting that still looks the same", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"]] },
+    { k: "video", tune: "video", label: "Video quality", desc: "For Compress, and when a video has to be re-encoded (MP4, MOV, WebM, 720p). Short samples are measured first, so the whole video gets the smallest setting that still looks the same", options: [["small", "Smaller: looks very close"], ["balanced", "Balanced: looks the same (recommended)"], ["best", "Best: the same, even side by side"]] },
     { k: "gifWidth", label: "GIF width", desc: "Height follows", options: [[320, "320 px"], [480, "480 px"], [640, "640 px"]] },
-    { k: "gifSeconds", label: "GIF length", desc: "Longer videos use only the start", options: [[10, "First 10 s"], [30, "First 30 s"], [60, "First 60 s"]] },
+    { k: "gifSeconds", label: "GIF length", desc: "From the start; longer videos are cut", options: [[10, "First 10 s"], [30, "First 30 s"], [60, "First 60 s"]] },
   ] },
 ];
 const LICENCES = [
@@ -416,8 +416,8 @@ function renderQuality() {
       if (!kind) return `<div class="qrow"><label for="${id}" class="grow"><div>${esc(r.label)}</div><div class="sub">${esc(r.desc)}</div></label>${control}</div>`;
       const edited = grade && tuneEdited(kind, grade);
       const open = !!(grade && tuneOpen[kind]);
-      const button = `<button type="button" class="btn tune-btn" data-tune="${kind}" aria-expanded="${open}"${grade ? "" : ' disabled title="Tune works with Smaller, Balanced or Best"'}>Tune ${CHEVRON}</button>`;
-      return `<div class="qrow"><label for="${id}" class="grow"><div>${esc(r.label)}${edited ? '<span class="edited">● edited</span>' : ""}</div><div class="sub">${esc(r.desc)}</div></label>${control}${button}</div>` +
+      const button = `<button type="button" class="btn tune-btn" data-tune="${kind}" aria-expanded="${open}"${grade ? "" : ' disabled title="Fine-tune works with Smaller, Balanced or Best"'}>Fine-tune ${CHEVRON}</button>`;
+      return `<div class="qrow"><label for="${id}" class="grow"><div>${esc(r.label)}${edited ? '<span class="edited">● Customised</span>' : ""}</div><div class="sub">${esc(r.desc)}</div></label>${control}${button}</div>` +
         (grade ? `<div class="tune-stats">${tuneStatsLine(kind, grade)}</div>` : "") +
         (open ? tunePanel(kind, grade) : "");
     }).join("") + `</div>`).join("");
@@ -456,30 +456,30 @@ const lookWord = (words, v) => words.reduce((w, [n, s]) => (v >= n ? s : w), wor
 const nth = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
 const TUNE = {
   image: [
-    { g: "Look" },
-    { k: "look", label: "How close it must look", tech: "SSIMULACRA2 score", min: 50, max: 95, step: 1, ends: ["Smaller", "Closer"], words: LOOK_WORDS, order: true },
-    { k: "floor", label: "Never go below quality", tech: "JPG and WebP (AVIF 10 lower)", min: 30, max: 90, step: 1, ends: ["30", "90"] },
+    { g: "Quality" },
+    { k: "look", label: "Quality target", tech: "SSIMULACRA2 score", min: 50, max: 95, step: 1, ends: ["Smaller file", "More detail"], words: LOOK_WORDS, order: true },
+    { k: "floor", label: "Lowest quality allowed", tech: "Stops busy photos going blurry · JPG and WebP (AVIF 10 lower)", min: 30, max: 90, step: 1, ends: ["30", "90"] },
     { g: "Speed and privacy" },
-    { k: "png", label: "PNG effort", tech: "Lossless: only changes how long it takes", seg: [[0, "Quick"], [1, "Normal"], [2, "Thorough"]] },
-    { k: "stripGps", label: "Remove location (GPS)", tech: "Camera, date and the rest of the EXIF are kept", toggle: true },
+    { k: "png", label: "PNG compression effort", tech: "Same picture, just more time for a smaller file", seg: [[0, "Quick"], [1, "Normal"], [2, "Thorough"]] },
+    { k: "stripGps", label: "Remove location (GPS)", tech: "Keeps the camera, date and other photo details", toggle: true },
   ],
   video: [
-    { g: "Look" },
-    { k: "look", label: "How close it must look", tech: "VMAF score", min: 80, max: 99, step: 0.5, ends: ["Smaller", "Closer"], words: VLOOK_WORDS, order: true },
-    { k: "codec", label: "Compress as", tech: "Converting to MP4 stays H.264", seg: [["h265", "H.265 (smaller)"], ["h264", "H.264 (plays everywhere)"], ["av1", "AV1"]] },
-    { g: "Size limits · Compress" },
-    { k: "maxRes", label: "Never bigger than", tech: "Smaller videos are left as they are", seg: [[0, "Keep"], [2160, "4K"], [1440, "1440p"], [1080, "1080p"], [720, "720p"]] },
-    { k: "maxFps", label: "Frame rate at most", tech: "Divided evenly: 144 → 48, 120 → 60", seg: [[0, "Keep"], [60, "60"], [30, "30"]] },
-    { k: "audio", label: "Audio", tech: "AAC; kept as it is when already small", seg: [[96, "96 kbps"], [128, "128 kbps"], [192, "192 kbps"]] },
+    { g: "Quality" },
+    { k: "look", label: "Quality target", tech: "VMAF score", min: 80, max: 99, step: 0.5, ends: ["Smaller file", "More detail"], words: VLOOK_WORDS, order: true },
+    { k: "codec", label: "Video format", tech: "For Compress; converting to MP4 stays H.264", seg: [["h265", "H.265: smaller"], ["h264", "H.264: plays everywhere"], ["av1", "AV1: smallest, newer devices"]] },
+    { g: "Size limits (Compress only)" },
+    { k: "maxRes", label: "Maximum resolution", tech: "Bigger videos are scaled down; smaller ones are left alone", seg: [[0, "Original"], [2160, "4K"], [1440, "1440p"], [1080, "1080p"], [720, "720p"]] },
+    { k: "maxFps", label: "Maximum frame rate", tech: "Higher rates are reduced evenly: 144 → 48, 120 → 60", seg: [[0, "Original"], [60, "60 fps"], [30, "30 fps"]] },
+    { k: "audio", label: "Audio quality", tech: "AAC; audio that's already this small is kept as it is", seg: [[96, "96 kbps"], [128, "128 kbps"], [192, "192 kbps"]] },
     { g: "Speed" },
-    { k: "encoder", label: "Encode on", tech: "Graphics card: fast · Processor (x265, x264): smaller files · Auto: measures both now and then", seg: [["gpu", "Graphics card"], ["cpu", "Processor"], ["auto", "Auto"]] },
-    { k: "effort", label: "Encoder effort", tech: "x265 fast / medium / slow · NVIDIA p4 / p5 / p7", seg: [[0, "Faster"], [1, "Medium"], [2, "Slower"]] },
-    { k: "recheck", label: "Full look check every", tech: "Once a setting is confirmed for a kind of video", min: 1, max: 20, step: 1, ends: ["Every video", "Every 20th"], fmt: (v) => (v <= 1 ? "video" : nth(v)) },
+    { k: "encoder", label: "Encoder", tech: "Processor means x265/x264 · Auto measures both now and then", seg: [["gpu", "Graphics card: fast"], ["cpu", "Processor: smaller files"], ["auto", "Auto: picks per video"]] },
+    { k: "effort", label: "Encoding speed", tech: "x265 fast / medium / slow · NVIDIA p4 / p5 / p7", seg: [[0, "Fast: bigger file"], [1, "Balanced"], [2, "Thorough: smaller file"]] },
+    { k: "recheck", label: "Re-check quality every", tech: "Once a setting has worked for a kind of video, the check is skipped in between", min: 1, max: 20, step: 1, ends: ["Every video", "Every 20th"], fmt: (v) => (v <= 1 ? "video" : nth(v)) },
   ],
   pdf: [
-    { g: "Look" },
-    { k: "look", label: "How close it must look", tech: "SSIMULACRA2 on rendered pages", min: 50, max: 95, step: 1, ends: ["Smaller", "Closer"], words: LOOK_WORDS, order: true },
-    { k: "checkDpi", label: "Check pages at", tech: "Higher catches finer detail, and takes longer", seg: [[110, "110 DPI"], [150, "150 DPI"], [200, "200 DPI"]] },
+    { g: "Quality" },
+    { k: "look", label: "Quality target", tech: "SSIMULACRA2 on rendered pages", min: 50, max: 95, step: 1, ends: ["Smaller file", "More detail"], words: LOOK_WORDS, order: true },
+    { k: "checkDpi", label: "Comparison detail", tech: "Finer catches small text damage, and takes longer", seg: [[110, "Normal"], [150, "Fine"], [200, "Finest"]] },
   ],
 };
 
@@ -528,10 +528,10 @@ function duration(sec) {
 function tuneStatsLine(kind, grade) {
   if (!tuneInfo) return "";
   const s = tuneInfo.stats && tuneInfo.stats[`${kind}.${grade}`];
-  if (!s || !s.count) return esc(tuneEdited(kind, grade) ? "No compressions since you tuned it yet." : "No compressions with this preset yet.");
-  const pct = Math.max(1, Math.round(s.ratio * 100));
-  const what = s.count === 1 ? "Your last compression" : `Your last ${s.count} compressions`;
-  return `${what}: <b>${pct}%</b> of the original on average, <b>${duration(s.seconds)}</b> each`;
+  if (!s || !s.count) return esc(tuneEdited(kind, grade) ? "No compressions since you customised it yet." : "No compressions with this preset yet.");
+  const smaller = Math.round((1 - s.ratio) * 100);
+  const what = s.count === 1 ? "Last compression" : `Last ${s.count} compressions`;
+  return `${what}: <b>${smaller}% smaller</b>${s.count === 1 ? "" : " on average"}, <b>${duration(s.seconds)}</b> each`;
 }
 
 function tunePanel(kind, grade) {
@@ -539,7 +539,7 @@ function tunePanel(kind, grade) {
   const knobs = TUNE[kind].map((k) => {
     if (k.g) return `<div class="tune-group">${esc(k.g)}</div>`;
     const val = v[k.k];
-    const head = `<div class="knob-text"><div>${esc(k.label)}</div><div class="sub">${esc(k.tech)}${k.words ? ` · <span data-word="${k.k}">${esc(lookWord(k.words, val))}</span>` : ""}</div></div>`;
+    const head = `<div class="knob-text"><div>${esc(k.label)}</div><div class="sub">${esc(k.tech)}${k.words ? ` · this level: <span data-word="${k.k}">${esc(lookWord(k.words, val))}</span>` : ""}</div></div>`;
     if (k.toggle) {
       return `<div class="knob">${head}<button type="button" class="switch" role="switch" data-tswitch="${k.k}" aria-checked="${!!val}"><span></span></button></div>`;
     }
@@ -562,7 +562,12 @@ function tunePanel(kind, grade) {
   }).join("");
   return `<div class="tune-panel" data-tkind="${kind}" data-tgrade="${grade}">${knobs}${testBox(kind)}` +
     `<div class="tune-foot"><span class="sub">Changes save straight away and apply everywhere: the wheel, Compress, the command line and AI apps.</span>` +
-    `<button type="button" class="link" data-treset${tuneEdited(kind, grade) ? "" : " disabled"}>Reset ${GRADE_NAME[grade]} to default</button></div></div>`;
+    `<button type="button" class="link" data-treset${tuneEdited(kind, grade) ? "" : " disabled"}>Restore ${GRADE_NAME[grade]} defaults</button></div></div>`;
+}
+
+function panelGrade(kind) {
+  const key = { image: "image", video: "video", pdf: "pdfCompress" }[kind];
+  return GRADE_OF[(view.settings.quality || {})[key]] || "balanced";
 }
 
 function testBox(kind) {
@@ -577,14 +582,14 @@ function testBox(kind) {
   if (t.state === "done") {
     const r = t.result;
     const ok = r.score === null || r.score === undefined || r.score >= r.target - 0.05;
-    const look = r.score === null || r.score === undefined ? "Checked" : `${Math.round(r.score * 10) / 10} <span class="sub">/ ${r.target}</span>`;
+    const look = r.score === null || r.score === undefined ? "Checked" : `${Math.round(r.score * 10) / 10} <span class="sub">target ${r.target}</span>`;
     const time = r.estimate ? `about ${duration(r.seconds)}` : duration(r.seconds);
-    return `<div class="test-box done" data-test-kind="${kind}"><div class="grow"><b>${esc(r.name)}</b> <span class="${ok ? "good" : "warnc"}">${ok ? "✓ reached the look score" : "Didn't reach the look score; the closest setting is used"}</span>` +
-      `<div class="test-grid"><div><span>Size</span><b>~${Math.max(1, Math.round(r.ratio * 100))}%</b></div><div><span>Look</span><b>${look}</b></div>` +
-      `<div><span>${r.estimate ? "Whole video" : "Took"}</span><b>${esc(time)}</b></div><div><span>Setting</span><b>${esc(r.setting)}</b></div></div></div>` +
+    return `<div class="test-box done" data-test-kind="${kind}"><div class="grow"><b>${esc(r.name)}</b> <span class="${ok ? "good" : "warnc"}">${ok ? (tuneEdited(kind, panelGrade(kind)) ? "✓ Meets your quality target" : "✓ Looks the same as the original") : "Couldn't reach the quality target; the closest setting is used"}</span>` +
+      `<div class="test-grid"><div><span>Size</span><b>${Math.round((1 - r.ratio) * 100)}% smaller</b> <span class="sub">${Math.max(1, Math.round(r.ratio * 100))}% of the original</span></div><div><span>Quality</span><b>${look}</b></div>` +
+      `<div><span>${r.estimate ? "Time for the whole video" : "Took"}</span><b>${esc(time)}</b></div><div><span>Used</span><b>${esc(r.setting)}</b></div></div></div>` +
       `<div class="test-actions"><button type="button" class="btn primary" data-tcompare="${r.compare}">Compare</button><button type="button" class="link" data-ttest>Try another file</button></div></div>`;
   }
-  return `<div class="test-box" data-test-kind="${kind}"><div class="grow"><b>Test on a file</b><div class="sub">Runs these settings on a file you pick (or drop here): ${what}. Nothing is saved next to it.</div></div><button type="button" class="btn" data-ttest>Choose file…</button></div>`;
+  return `<div class="test-box" data-test-kind="${kind}"><div class="grow"><b>Try these settings on a file</b><div class="sub">Pick a file (or drop one here): ${what}. Nothing is saved next to it.</div></div><button type="button" class="btn" data-ttest>Choose file…</button></div>`;
 }
 
 function saveTune(kind, grade, key, value) {
@@ -1184,7 +1189,7 @@ function demoInvoke(cmd, args) {
       });
     }
     case "tune_pick_file": return Promise.resolve("E:\\Videos\\Valorant 2026-10-09.mp4");
-    case "tune_test": return new Promise((res) => setTimeout(() => res({ name: "Valorant 2026-10-09.mp4", ratio: 0.27, score: 94.3, target: 93, setting: "HEVC (NVIDIA) CQ 27", seconds: 95, estimate: true, compare: 7 }), 1500));
+    case "tune_test": return new Promise((res) => setTimeout(() => res({ name: "Valorant 2026-10-09.mp4", ratio: 0.27, score: 94.3, target: 93, setting: "H.265 on the graphics card, level 27", seconds: 95, estimate: true, compare: 7 }), 1500));
     case "presets_export": return Promise.resolve("C:\\Users\\you\\Documents\\convertino-presets.json");
     case "presets_import": return Promise.resolve({ path: "C:\\Users\\you\\Downloads\\crofty-presets.json", tune: { video: { balanced: { look: 91 } } }, changes: ["Video › Balanced: look 93.0 → 91.0", "Video › Balanced: encoder gpu → cpu"] });
     case "presets_apply": d.settings.quality.tune = args.tune; return Promise.resolve(viewOf());

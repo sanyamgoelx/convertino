@@ -34,6 +34,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the release tags, for "what changed"
+
+      # Interface text, docs and the version number only (since the last
+      # release): the tests with real conversions are skipped; the app is
+      # still built, and its installers still installed (verify-install).
+      # See ci/ui-only.py. A run started by hand always runs every test.
+      - name: What changed
+        id: changes
+        shell: bash
+        run: $(command -v python3 || command -v python) ci/ui-only.py
 
       - uses: actions/setup-node@v4
         with:
@@ -181,7 +192,7 @@ jobs:
 
       - name: Restore downloaded converters
         id: dl-cache
-        if: runner.os == 'Windows' || matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch'
+        if: (runner.os == 'Windows' || matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch') && steps.changes.outputs.ui_only != 'true'
         uses: actions/cache/restore@v4
         with:
           path: src-tauri/tools
@@ -189,7 +200,7 @@ jobs:
 
       - name: Download the other converters (Mac)
         timeout-minutes: 40
-        if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch')
+        if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch') && steps.changes.outputs.ui_only != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -201,7 +212,7 @@ jobs:
             || { echo "Retrying the downloads in 30 s"; sleep 30; cargo test --lib install::tests::fetch_tools -- --ignored --nocapture; }
 
       - name: Keep the downloaded converters (Mac)
-        if: runner.os == 'macOS' && steps.dl-cache.outcome == 'success' && steps.dl-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'macOS' && steps.dl-cache.outcome == 'success' && steps.dl-cache.outputs.cache-hit != 'true' && steps.changes.outputs.ui_only != 'true'
         uses: actions/cache/save@v4
         with:
           path: src-tauri/tools
@@ -209,14 +220,14 @@ jobs:
 
       - name: Tests with real conversions (Mac)
         timeout-minutes: 60
-        if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch')
+        if: runner.os == 'macOS' && (matrix.name != 'macos-intel' || github.event_name == 'workflow_dispatch') && steps.changes.outputs.ui_only != 'true'
         working-directory: src-tauri
         run: cargo test -- --nocapture
 
       # ---- Windows checks: the same tests with real conversions ----
       - name: Download the converters (Windows)
         timeout-minutes: 40
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.changes.outputs.ui_only != 'true'
         working-directory: src-tauri
         shell: bash
         env:
@@ -226,7 +237,7 @@ jobs:
             || { echo "Retrying the downloads in 30 s"; sleep 30; cargo test --lib install::tests::fetch_tools -- --ignored --nocapture; }
 
       - name: Keep the downloaded converters (Windows)
-        if: runner.os == 'Windows' && steps.dl-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && steps.dl-cache.outputs.cache-hit != 'true' && steps.changes.outputs.ui_only != 'true'
         uses: actions/cache/save@v4
         with:
           path: src-tauri/tools
@@ -234,7 +245,7 @@ jobs:
 
       - name: Tests with real conversions (Windows)
         timeout-minutes: 60
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.changes.outputs.ui_only != 'true'
         working-directory: src-tauri
         run: cargo test -- --nocapture
 

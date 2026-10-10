@@ -237,17 +237,17 @@ function launch(s, args) {
 // ---------- Shift+click options ----------
 // The values start from Settings (model.quality); "Use these every time" saves them there.
 
-const SIZES = [[0, "Keep the size"], [3840, "Longest side 3840 px"], [2560, "Longest side 2560 px"], [1920, "Longest side 1920 px"], [1280, "Longest side 1280 px"]];
+const SIZES = [[0, "Don't resize"], [3840, "Up to 3840 px"], [2560, "Up to 2560 px"], [1920, "Up to 1920 px"], [1280, "Up to 1280 px"]];
 const FIELDS = {
-  image: { label: "File size", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"], ["fixed", "Fixed quality"]] },
+  image: { label: "Picture quality", options: [["small", "Smaller: looks very close"], ["balanced", "Balanced: looks the same"], ["best", "Best: the same, even side by side"], ["fixed", "Fixed quality"]] },
   jpg: { label: "Quality (Fixed)", min: 50, max: 100 },
   webp: { label: "Quality (Fixed)", min: 50, max: 100 },
-  convertMax: { label: "Size", options: SIZES },
+  convertMax: { label: "Resize large pictures", options: SIZES },
   resize: { label: "Longest side", options: [[1280, "1280 px"], [1920, "1920 px"], [2560, "2560 px"], [3840, "3840 px (4K)"]] },
   dpi: { label: "Page resolution", options: [[72, "Screen (72 DPI)"], [150, "Standard (150 DPI)"], [300, "Print (300 DPI)"]] },
-  pdfCompress: { label: "Compress", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["high", "Best quality"]] },
+  pdfCompress: { label: "PDF compression", options: [["small", "Smaller: looks very close"], ["balanced", "Balanced: looks the same"], ["high", "Best: the same, even side by side"]] },
   mp3: { label: "Quality", options: [[128, "About 130 kbps"], [160, "About 165 kbps"], [192, "About 190 kbps"], [320, "Highest (about 245 kbps)"]] },
-  video: { label: "Quality", options: [["small", "Smaller (looks very close)"], ["balanced", "Balanced (looks the same)"], ["best", "Best (the same, even side by side)"]] },
+  video: { label: "Video quality", options: [["small", "Smaller: looks very close"], ["balanced", "Balanced: looks the same"], ["best", "Best: the same, even side by side"]] },
   gifWidth: { label: "Width", options: [[320, "320 px"], [480, "480 px"], [640, "640 px"]] },
   gifSeconds: { label: "Length", options: [[10, "First 10 s"], [30, "First 30 s"], [60, "First 60 s"]] },
 };
@@ -267,12 +267,12 @@ const DEFAULT_Q = { jpg: 90, webp: 85, resize: 1920, convertMax: 0, dpi: 150, pd
 const GRADE_NAMES = { small: "Smaller", balanced: "Balanced", best: "Best" };
 const QUICK_TUNE = {
   image: [
-    { k: "look", label: "How close it must look", min: 50, max: 95, step: 1 },
+    { k: "look", label: "Quality target (80 = looks the same)", min: 50, max: 95, step: 1 },
     { k: "stripGps", label: "Remove location (GPS)", toggle: true },
   ],
   video: [
-    { k: "look", label: "How close it must look", min: 80, max: 99, step: 0.5 },
-    { k: "encoder", label: "Encode on", options: [["gpu", "Graphics card (fast)"], ["cpu", "Processor (smaller files)"], ["auto", "Auto"]] },
+    { k: "look", label: "Quality target (93 = looks the same)", min: 80, max: 99, step: 0.5 },
+    { k: "encoder", label: "Encoder", options: [["gpu", "Graphics card: fast"], ["cpu", "Processor: smaller files"], ["auto", "Auto: picks per video"]] },
   ],
 };
 
@@ -300,7 +300,7 @@ function quickTuneHtml() {
     return `<label class="opts-field"><span class="row"><span>${esc(f.label)}</span><span class="val" data-tv="${f.k}">${v}</span></span>` +
       `<input type="range" data-tune="${f.k}" min="${f.min}" max="${f.max}" step="${f.step}" value="${v}"></label>`;
   }).join("");
-  return `<details class="opts-tune"${optsFor.tuneOpen ? " open" : ""}><summary>Tune ${GRADE_NAMES[grade]} for this conversion</summary><div class="opts-fields">${rows}</div></details>`;
+  return `<details class="opts-tune"${optsFor.tuneOpen ? " open" : ""}><summary>Fine-tune ${GRADE_NAMES[grade]} for this file</summary><div class="opts-fields">${rows}</div></details>`;
 }
 
 function renderQuickTune() {
