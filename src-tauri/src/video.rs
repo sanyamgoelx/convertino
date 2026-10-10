@@ -192,6 +192,57 @@ pub fn forget_encoders() {
     if let Ok(mut m) = working_map().lock() {
         m.clear();
     }
+    if let Some(path) = caps_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+// What this FFmpeg can do (working encoders, VMAF) is checked once and kept in
+// video-caps.json for a few hours, so a batch run from the command line (one
+// process per file) doesn't spend seconds re-testing every encoder each time.
+// The entry is tied to the FFmpeg file (path, size, date): a new build re-checks.
+
+/// How long a capability check stays trusted (a driver update can change it).
+const CAPS_FRESH_SECS: u64 = 6 * 3600;
+
+fn caps_path() -> Option<PathBuf> {
+    crate::settings::config_dir().map(|d| d.join("video-caps.json"))
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Which FFmpeg the cached checks belong to.
+fn ffmpeg_id(ff: &Path) -> String {
+    let (len, mtime) = ff
+        .metadata()
+        .map(|m| (m.len(), m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)))
+        .unwrap_or((0, 0));
+    format!("{}|{len}|{mtime}", ff.display())
+}
+
+fn caps_read(ff: &Path, field: &str) -> Option<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(caps_path()?).ok()?).ok()?;
+    if v.get("ffmpeg")?.as_str()? != ffmpeg_id(ff) || now_secs().saturating_sub(v.get("checked")?.as_u64()?) > CAPS_FRESH_SECS {
+        return None;
+    }
+    v.get(field).cloned()
+}
+
+fn caps_write(ff: &Path, field: &str, value: serde_json::Value) {
+    let Some(path) = caps_path() else { return };
+    let id = ffmpeg_id(ff);
+    let mut v: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .filter(|v: &serde_json::Value| v.get("ffmpeg").and_then(|x| x.as_str()) == Some(id.as_str()))
+        .unwrap_or_else(|| serde_json::json!({ "ffmpeg": id, "checked": now_secs() }));
+    v[field] = value;
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap_or_default());
 }
 
 /// The H.264 encoder in use, in words, for Settings.
@@ -232,6 +283,14 @@ pub fn working(codec: Codec) -> Vec<&'static str> {
         return hit;
     }
     let Some(ff) = tools::find(Tool::Ffmpeg) else { return Vec::new() };
+    let field = format!("encoders-{}", codec.key());
+    if let Some(list) = caps_read(&ff, &field).and_then(|v| v.as_array().cloned()) {
+        let known: Vec<&'static str> = list.iter().filter_map(|e| candidates(codec).iter().copied().find(|c| Some(*c) == e.as_str())).collect();
+        if let Ok(mut m) = map.lock() {
+            m.insert(codec, known.clone());
+        }
+        return known;
+    }
     let listed = tools::command(&ff)
         .args(["-hide_banner", "-encoders"])
         .stdin(Stdio::null())
@@ -262,6 +321,7 @@ pub fn working(codec: Codec) -> Vec<&'static str> {
     if let Ok(mut m) = map.lock() {
         m.insert(codec, found.clone());
     }
+    caps_write(&ff, &field, serde_json::json!(found));
     found
 }
 
@@ -495,10 +555,19 @@ fn metric() -> Metric {
     if let Some(m) = cell.lock().ok().and_then(|g| *g) {
         return m;
     }
-    let has_vmaf = tools::find(Tool::Ffmpeg)
-        .and_then(|ff| tools::command(&ff).args(["-hide_banner", "-filters"]).stdin(Stdio::null()).output().ok())
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(1) == Some("libvmaf")))
-        .unwrap_or(false);
+    let ff = tools::find(Tool::Ffmpeg);
+    let cached = ff.as_deref().and_then(|ff| caps_read(ff, "vmaf")).and_then(|v| v.as_bool());
+    let has_vmaf = cached.unwrap_or_else(|| {
+        let has = ff
+            .as_deref()
+            .and_then(|ff| tools::command(ff).args(["-hide_banner", "-filters"]).stdin(Stdio::null()).output().ok())
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().nth(1) == Some("libvmaf")))
+            .unwrap_or(false);
+        if let Some(ff) = ff.as_deref() {
+            caps_write(ff, "vmaf", serde_json::json!(has));
+        }
+        has
+    });
     let m = if has_vmaf { Metric::Vmaf } else { Metric::Ssim };
     log::info!("video look measure: {m:?}");
     if let Ok(mut g) = cell.lock() {
@@ -525,7 +594,11 @@ fn sample_spans(duration: Option<f64>) -> Vec<(f64, f64)> {
 
 /// The filter that brings a picture to the size it's compared at: the job's
 /// size (720p), then at most 1080 lines high (VMAF's model is for 1080p, and
-/// it's much faster).
+/// it's much faster). Frames are then numbered 0, 1, 2… on both sides, so the
+/// n-th sample frame is compared with the n-th source frame. Comparing by the
+/// files' own timestamps paired the wrong frames on recordings with uneven
+/// frame timing (game captures): a near-lossless encode scored ~74 instead of
+/// ~97, every setting "failed", and Compress fell back to its biggest output.
 fn compare_filter(scale_to: Option<u32>, height: u32) -> String {
     let h = scale_to.unwrap_or(height).max(2);
     let mut f = String::new();
@@ -535,7 +608,7 @@ fn compare_filter(scale_to: Option<u32>, height: u32) -> String {
     if h > 1080 {
         f.push_str("scale=-2:1080:flags=bicubic,");
     }
-    f.push_str("format=yuv420p,setpts=PTS-STARTPTS");
+    f.push_str("format=yuv420p,setpts=N/(30*TB)");
     f
 }
 
@@ -558,6 +631,7 @@ fn trial(input: &Path, p: &Probe, enc: &'static str, value: u32, q: Quality, sca
     let mut bytes = 0;
     let mut scores = Vec::new();
     let mut encode_secs = 0.0;
+    let mut measure_secs = 0.0;
     for (i, (start, len)) in spans.iter().enumerate() {
         if crate::procs::cancelled_here() {
             return Err(crate::procs::CANCELLED.into());
@@ -571,7 +645,9 @@ fn trial(input: &Path, p: &Probe, enc: &'static str, value: u32, q: Quality, sca
         if let Some(sh) = scale_to {
             cmd.args(["-vf", &format!("scale=-2:{sh}:flags=lanczos")]);
         }
-        cmd.args(encoder_args_at(enc, value, q, w, h)).arg(&out);
+        // Every source frame, untouched in timing (no frames added or dropped to
+        // even out the frame rate), so the sample lines up frame for frame.
+        cmd.args(encoder_args_at(enc, value, q, w, h)).args(["-fps_mode", "passthrough"]).arg(&out);
         let t0 = std::time::Instant::now();
         crate::convert::exec(Tool::Ffmpeg, cmd)?;
         encode_secs += t0.elapsed().as_secs_f64();
@@ -591,7 +667,9 @@ fn trial(input: &Path, p: &Probe, enc: &'static str, value: u32, q: Quality, sca
             .args(["-ss", &format!("{start:.3}"), "-t", &format!("{len:.3}"), "-i"])
             .arg(input)
             .args(["-lavfi", &graph, "-f", "null", "-"]);
+        let t1 = std::time::Instant::now();
         let o = crate::procs::output(&mut m, "FFmpeg", None)?;
+        measure_secs += t1.elapsed().as_secs_f64();
         let text = String::from_utf8_lossy(&o.stderr);
         let sc = parse_score(&text).ok_or_else(|| format!("couldn't measure the sample: {}", last_lines(&text)))?;
         scores.push(sc);
@@ -601,7 +679,7 @@ fn trial(input: &Path, p: &Probe, enc: &'static str, value: u32, q: Quality, sca
     let mean = scores.iter().sum::<f64>() / scores.len().max(1) as f64;
     let worst = scores.iter().copied().fold(100.0, f64::min);
     let score = mean.min(worst + 3.0);
-    log::info!("video look: {enc} at {value}: {score:.2} ({scores:?}), {bytes} bytes, {encode_secs:.1}s");
+    log::info!("video look: {enc} at {value}: {score:.2} ({scores:?}), {bytes} bytes, encode {encode_secs:.1}s, measure {measure_secs:.1}s");
     Ok(Trial { encoder: enc, value, score, bytes, secs: encode_secs })
 }
 
@@ -626,17 +704,27 @@ fn search(
     scale_to: Option<u32>,
     spans: &[(f64, f64)],
     dir: &Path,
+    start: Option<u32>,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Trial, String> {
     let (lo, hi) = knob_range(enc).ok_or("no quality setting")?;
     let mut tried: Vec<Trial> = Vec::new();
-    let mut v = default_knob(enc, q).clamp(lo, hi);
+    let default = default_knob(enc, q).clamp(lo, hi);
+    let mut v = start.unwrap_or(default).clamp(lo, hi);
     for round in 0..MAX_TRIALS {
         if tried.iter().any(|t| t.value == v) {
             break;
         }
         tried.push(trial(input, p, enc, v, q, scale_to, spans, dir)?);
         progress((round + 1) as f64 / MAX_TRIALS as f64);
+        // A remembered setting that still passes, just above the bar, is the
+        // answer: one trial instead of two or three.
+        if round == 0 && start.is_some() {
+            let t = &tried[0];
+            if t.score >= target && t.score < target + CLOSE_ENOUGH {
+                break;
+            }
+        }
         let pass = tried.iter().filter(|t| t.score >= target).max_by_key(|t| t.value);
         let fail = tried.iter().filter(|t| t.score < target).min_by_key(|t| t.value);
         v = match (pass, fail) {
@@ -665,8 +753,21 @@ fn search(
             (None, None) => break,
         };
     }
-    let best = match tried.iter().filter(|t| t.score >= target).max_by_key(|t| t.value) {
-        Some(t) => t.value,
+    let best_score = tried.iter().map(|t| t.score).fold(0.0, f64::max);
+    let passing = tried.iter().filter(|t| t.score >= target).max_by_key(|t| t.value).map(|t| t.value);
+    let best = match passing {
+        Some(v) => v,
+        // Nothing reached the bar, but even the best-looking setting scored far
+        // below it: the measurement can't be trusted on this video (no real
+        // encode at these settings looks that bad), so use the usual setting
+        // rather than the biggest file.
+        None if best_score < target - UNTRUSTED_GAP => {
+            log::warn!("video look: best score {best_score:.1} is far below {target:.1}; not trusting it, using the usual setting");
+            if !tried.iter().any(|t| t.value == default) {
+                tried.push(trial(input, p, enc, default, q, scale_to, spans, dir)?);
+            }
+            default
+        }
         None => tried.iter().map(|t| t.value).min().unwrap_or(lo),
     };
     let i = tried.iter().position(|t| t.value == best).unwrap_or(0);
@@ -675,6 +776,77 @@ fn search(
 
 /// Settings tried per encoder: about one per second of waiting on a fast PC.
 const MAX_TRIALS: usize = 3;
+
+/// A remembered setting that passes by less than this needs no more trials.
+const CLOSE_ENOUGH: f64 = 2.0;
+
+/// Scores this far below the bar at the best-looking setting mean the
+/// measurement is wrong for this video, not that the video is hard.
+const UNTRUSTED_GAP: f64 = 8.0;
+
+// The setting that won for a kind of video (encoder, level, size, frame rate,
+// source codec and bitrate) is kept in video-look.json; the next video of the
+// same kind starts there, and usually one trial confirms it. A batch of game
+// recordings then costs one trial each instead of three.
+
+fn look_path() -> Option<PathBuf> {
+    crate::settings::config_dir().map(|d| d.join("video-look.json"))
+}
+
+fn look_key(enc: &str, q: Quality, input: &Path, p: &Probe, scale_to: Option<u32>) -> String {
+    let h = scale_to.unwrap_or(p.height);
+    let w = if p.height > 0 { p.width * h / p.height } else { p.width };
+    let fps = p.fps.unwrap_or(0.0).round() as u32;
+    // Source bitrate in rough steps (doubling), from size and length.
+    let mbps = match (input.metadata().map(|m| m.len()).ok(), p.duration) {
+        (Some(b), Some(d)) if d > 0.0 => b as f64 * 8.0 / d / 1e6,
+        _ => 0.0,
+    };
+    let step = if mbps > 0.0 { (mbps.log2() * 2.0).round() as i32 } else { -99 };
+    format!("{enc}|{q:?}|{w}x{h}|{fps}|{}|{step}", p.video.as_deref().unwrap_or("?")).to_lowercase()
+}
+
+fn look_recall(key: &str) -> Option<u32> {
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(look_path()?).ok()?).ok()?;
+    v.get(key)?.as_u64().map(|x| x as u32)
+}
+
+fn look_keep(key: &str, value: u32) {
+    let Some(path) = look_path() else { return };
+    let mut v: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .filter(|v: &serde_json::Value| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    v[key] = serde_json::json!(value);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap_or_default());
+}
+
+/// `search`, starting from (and then remembering) the setting that won for
+/// this kind of video before.
+#[allow(clippy::too_many_arguments)]
+fn search_kind(
+    input: &Path,
+    p: &Probe,
+    enc: &'static str,
+    q: Quality,
+    target: f64,
+    scale_to: Option<u32>,
+    spans: &[(f64, f64)],
+    dir: &Path,
+    progress: &mut dyn FnMut(f64),
+) -> Result<Trial, String> {
+    let key = look_key(enc, q, input, p, scale_to);
+    let start = look_recall(&key);
+    let t = search(input, p, enc, q, target, scale_to, spans, dir, start, progress)?;
+    if t.score >= target {
+        look_keep(&key, t.value);
+    }
+    Ok(t)
+}
 
 /// encoder-choice.json: which encoder won the last measurement, per codec and size.
 fn choice_path() -> Option<PathBuf> {
@@ -727,6 +899,7 @@ fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>
     }
     let list: Vec<&'static str> = list.into_iter().filter(|e| knob_range(e).is_some()).collect();
     let Some(&first) = list.first() else { return Ok(None) };
+    let started = std::time::Instant::now();
     let hardware = list.iter().copied().find(|e| !is_software(e));
     let target = q.level().vmaf_target();
     let spans = sample_spans(p.duration);
@@ -739,17 +912,17 @@ fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>
     let chosen = match hardware {
         // "Balanced" and "Smaller": the graphics card, which is many times faster;
         // its setting is still chosen by how the result looks.
-        Some(hw) if q != Quality::Best => search(input, p, hw, q, target, scale_to, &spans, &tmp.0, progress)?,
+        Some(hw) if q != Quality::Best => search_kind(input, p, hw, q, target, scale_to, &spans, &tmp.0, progress)?,
         // "Best": software and card are both measured (now and then) and the better one kept.
         Some(hw) if hw != first && is_software(first) => match remembered(&key) {
             Some((enc, uses)) if uses < RECHECK_AFTER && list.iter().any(|e| *e == enc) => {
                 let enc = list.iter().copied().find(|e| *e == enc).unwrap_or(first);
                 remember(&key, enc, uses + 1);
-                search(input, p, enc, q, target, scale_to, &spans, &tmp.0, progress)?
+                search_kind(input, p, enc, q, target, scale_to, &spans, &tmp.0, progress)?
             }
             _ => {
-                let sw = search(input, p, first, q, target, scale_to, &spans, &tmp.0, &mut |f| progress(f * 0.5))?;
-                let hwt = search(input, p, hw, q, target, scale_to, &spans, &tmp.0, &mut |f| progress(0.5 + f * 0.5))?;
+                let sw = search_kind(input, p, first, q, target, scale_to, &spans, &tmp.0, &mut |f| progress(f * 0.5))?;
+                let hwt = search_kind(input, p, hw, q, target, scale_to, &spans, &tmp.0, &mut |f| progress(0.5 + f * 0.5))?;
                 let use_hw = prefer_hardware(&sw, &hwt, duration, sampled, q);
                 log::info!(
                     "video encoder choice: {first} {} bytes in {:.1}s vs {hw} {} bytes in {:.1}s -> {}",
@@ -760,9 +933,10 @@ fn tune(input: &Path, p: &Probe, codec: Codec, q: Quality, scale_to: Option<u32>
                 t
             }
         },
-        _ => search(input, p, first, q, target, scale_to, &spans, &tmp.0, progress)?,
+        _ => search_kind(input, p, first, q, target, scale_to, &spans, &tmp.0, progress)?,
     };
     progress(1.0);
+    log::info!("video look: chose {} at {} in {:.1}s", chosen.encoder, chosen.value, started.elapsed().as_secs_f64());
     // How big the result will be next to the source, from the samples.
     let source_bytes = input.metadata().map(|m| m.len()).unwrap_or(0) as f64;
     let ratio = if duration > 0.0 && source_bytes > 0.0 { chosen.bytes as f64 / (source_bytes * sampled.min(duration) / duration) } else { 0.0 };
@@ -1079,6 +1253,33 @@ mod look_tests {
         assert!(check.score >= Quality::High.level().vmaf_target(), "{}", check.score);
         assert!(ratio < 0.6, "{ratio}");
         assert!(t.value > default_knob(t.encoder, Quality::Small) - 8);
+    }
+
+    /// Game recordings have uneven frame timing and dropped frames. A
+    /// near-lossless sample must still score as near-lossless (it scored in
+    /// the 70s–80s when frames were paired by timestamp).
+    #[test]
+    fn uneven_frame_timing_is_measured_right() {
+        let Some(ff) = tools::find(Tool::Ffmpeg) else { return };
+        if metric() != Metric::Vmaf || !working(Codec::H264).contains(&"libx264") {
+            return;
+        }
+        let d = std::env::temp_dir().join(format!("convertino-vfr-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let src = d.join("game.mp4");
+        assert!(tools::command(&ff)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=960x540:rate=60:duration=8"])
+            .args(["-vf", "noise=alls=6:allf=t,select='not(eq(mod(n\\,37)\\,5))',setpts='(N/60+0.006*sin(N*1.7))/TB'"])
+            .args(["-fps_mode", "passthrough", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "8", "-video_track_timescale", "90000"])
+            .arg(&src)
+            .status()
+            .unwrap()
+            .success());
+        let p = probe(&src).unwrap();
+        let tmp = crate::convert::TempDir::new("vfr-check").unwrap();
+        let t = trial(&src, &p, "libx264", 12, Quality::High, None, &sample_spans(p.duration), &tmp.0).unwrap();
+        assert!(t.score > 93.0, "near-lossless sample scored {}", t.score);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
