@@ -292,3 +292,5 @@ The PDF editor bundles PDF.js, pdf-lib, fontkit and three OFL fonts; see `ui/ven
 ## Licence
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+
