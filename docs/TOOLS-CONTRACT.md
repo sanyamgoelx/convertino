@@ -22,7 +22,7 @@ Each tool writes a small file about itself every time it starts:
   "version": "0.2.9",
   "app": "C:\\Users\\me\\AppData\\Local\\Convertino\\Convertino.exe",
   "cli": "C:\\Users\\me\\AppData\\Local\\Convertino\\convertino.exe",
-  "can": ["convert", "compress", "check-copy", "hold"],
+  "can": ["convert", "compress", "check-copy", "hold", "compare"],
   "repo": "sanyamgoelx/convertino",
   "written": 1791867100
 }
@@ -86,4 +86,40 @@ A copy that fails is deleted and the original stays where it was, with the reaso
 
 ## Clip record (Trimothy ↔ Drive Cleanup)
 
-To be defined in step 4: one record per clip (tags, trimmed or not, where the original is kept), owned by Trimothy, read by Drive Cleanup. Tags protect a clip from removal, not from compression.
+Built 13 Oct 2026. Trimothy owns it; Drive Cleanup only reads it.
+- Trimothy's entry in the tools folder lists `libraries` (recent folders holding a `cliptrim-index.json`).
+- Each index is `{ clips: { <uid>: { path, tags, ... } } }`; every trimmed file also carries `comment=cliptrim/1 id=<uid> tags=…`.
+- **Tags protect a clip from removal, not from compression**: Drive Cleanup shows the tags on Shrink rows, never
+  suggests a tagged clip (or a folder holding one) for removal, and may compress it.
+- A compressed clip keeps its uid, tags and marker (Trimothy re-stamps the copy), so it stays the same library clip.
+
+## Who writes what into the Holding Area
+
+| Tool | Batch name | Labels |
+| --- | --- | --- |
+| Drive Cleanup | `<time>` (removals), `shrink-<time>` with `"kind": "shrink"` (compressed videos) | its card labels; `shrink` |
+| Convertino | `<time> convertino`, `watched <folder> convertino` | Replaced by Convertino |
+| Trimothy | `<time> trimothy` (one per run) | Original, replaced by its trim · Rejected in Trimothy · Removed from the Trimothy library · Trim, replaced by its compressed copy |
+
+## Comparing a copy with its original (Convertino ↔ Drive Cleanup)
+
+Built 14 Oct 2026. Convertino owns comparing (one owner per job); Drive Cleanup owns deleting from the Holding Area.
+
+- **Finding pairs** works by a manifest's contents, never its batch name: an entry with `replaced` pairs the original
+  (`to`) with the copy in its place. Also "clip (compressed).mp4" (or "clip (10 MB).mp4") next to "clip.mp4". Both files must exist.
+- **Convertino's wheel** gets a Compare slot (last on the ring) for a video, picture or PDF that has a pair, several selected
+  files, a folder (pairs inside it, subfolders too) or a Holding Area batch folder (only Zip and Compare there).
+  Its entry in the tools folder lists `"compare"` in `can`.
+- **Shared "Looks good" mark:** `%LOCALAPPDATA%\sanyamgoelx\compare-marks.json` (Mac: `~/Library/Application Support/sanyamgoelx/`),
+  `{ "schema": 1, "marks": { "<lower-case path of the original>": { "at": <ms>, "by": "convertino" | "drive-cleanup", "copy": "<path>" } } }`.
+  A mark means "the original can be deleted". Either tool sets or clears it; Drive Cleanup lists marked originals under
+  Compressed Videos › Checked and deletes them. Drive Cleanup moved its old `data/shrink-checked.json` in once.
+- **Putting back:** only the tool that made the batch. In Convertino's Compare, Drive Cleanup's pairs get
+  "Put back or delete in Drive Cleanup", which starts Drive Cleanup with `--compare "<original>"` (its tools-folder entry's `app`).
+- **One way in:** while Convertino's entry has `"compare"`, Drive Cleanup leaves out its own Explorer entry
+  "Compare with compressed copy" (it comes back by itself when Convertino is gone).
+
+## Asking Convertino to check
+
+`convertino check <video> [copy] [--json]` (Convertino 0.2.9+): one file = is it sound (no broken sections);
+two files = does the copy look, sound and play like the original. Exit 0 = ok, 1 = not (`{schema, ok, why}`).

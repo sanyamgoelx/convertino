@@ -7,32 +7,54 @@
 <link rel="stylesheet" href="compare.css">
 </head>
 <body>
-  <header>
-    <div class="titles">
-      <h1 id="title">Compare</h1>
-      <span class="what" id="what"></span>
+  <aside class="list" id="list" hidden aria-label="Compressed copies">
+    <div class="tabs" id="tabs" role="group" aria-label="Show"></div>
+    <div class="rows" id="rows"></div>
+  </aside>
+  <main class="main" id="main">
+    <header class="head">
+      <div class="titles">
+        <h1 id="name">Compare</h1>
+        <span class="by" id="by"></span>
+      </div>
+      <span class="badge" id="badge" hidden></span>
+      <div class="nav" id="nav" hidden>
+        <button type="button" class="sq" id="prev" aria-label="Previous pair (K)">‹</button>
+        <span id="count"></span>
+        <button type="button" class="sq" id="next" aria-label="Next pair (J)">›</button>
+      </div>
+    </header>
+    <p class="save" id="save"></p>
+    <div class="facts-wrap"><table class="facts" id="facts"></table></div>
+    <p class="flag" id="flag" hidden></p>
+    <p class="note warn" id="still-note" hidden></p>
+    <div class="bar" id="bar">
+      <div class="seg" id="g-mode" role="group" aria-label="View"></div>
+      <div class="seg" id="g-zoom" role="group" aria-label="Zoom"></div>
+      <div class="seg" id="g-sound" role="group" aria-label="Sound"></div>
+      <label class="page" id="page-box" hidden>Page <input type="number" id="page" min="1" value="1"></label>
     </div>
-    <div class="nav" id="nav" hidden>
-      <button type="button" id="prev" aria-label="Previous file">‹</button>
-      <span id="count"></span>
-      <button type="button" id="next" aria-label="Next file">›</button>
+    <div class="stage m-side" id="stage">
+      <div class="pane po"><div class="view" id="view-o"></div><span class="label">Original</span></div>
+      <div class="pane pc"><div class="view" id="view-c"></div><span class="label">Compressed copy</span></div>
+      <div class="handle" id="handle" aria-hidden="true"><i></i></div>
+      <p class="status" id="status">Getting both files ready…</p>
     </div>
-  </header>
-  <main id="stage" class="stage" aria-busy="true">
-    <div class="frame" id="frame">
-      <img id="right" alt="Compressed">
-      <div class="left" id="leftwrap"><img id="left" alt="Original"></div>
-      <div class="handle" id="handle" aria-hidden="true"><span></span></div>
-      <span class="tag l" id="leftLabel"></span>
-      <span class="tag r" id="rightLabel"></span>
+    <div class="trans" id="trans">
+      <button type="button" class="primary" id="play" title="Play / pause (Space)">Play</button>
+      <button type="button" id="back1" title="One frame back (←)">◀ frame</button>
+      <button type="button" id="fwd1" title="One frame on (→)">frame ▶</button>
+      <span class="time" id="time">0:00.00</span>
+      <button type="button" id="flip" hidden title="Switch between the two (F)">Showing: copy · flip</button>
+      <label class="auto" id="auto-box" hidden><input type="checkbox" id="auto"> Flip by itself</label>
     </div>
-    <p class="status" id="status">Getting the pictures ready…</p>
+    <div class="tl" id="tl">
+      <div class="marks" id="marks"></div>
+      <input type="range" id="seek" min="0" max="1000" value="0" step="1" aria-label="Position">
+    </div>
+    <p class="keys" id="keys"></p>
+    <div class="act" id="act"></div>
   </main>
-  <footer>
-    <label for="slider">Slide to compare</label>
-    <input id="slider" type="range" min="0" max="100" value="50">
-    <button type="button" class="primary" id="done">Done</button>
-  </footer>
   <script src="compare.js"></script>
 </body>
 </html>

@@ -121,6 +121,8 @@ pub enum SlotKind {
     Target,
     More,
     Back,
+    /// Opens the Compare window for the compressed copies found (pairs.rs).
+    Compare,
 }
 
 #[derive(Serialize, Clone, Default, Debug)]
@@ -182,6 +184,9 @@ pub struct WheelModel {
     /// The folder as scanned, for the pick.
     #[serde(skip)]
     pub scan: Option<std::sync::Arc<crate::folder::Scan>>,
+    /// Compressed copies and their originals among what was clicked (the Compare slot).
+    #[serde(skip)]
+    pub compare: Vec<crate::pairs::Pair>,
 }
 
 /// What the folder wheel shows about the folder.
@@ -424,6 +429,13 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         (main, Vec::new())
     };
 
+    let mut main = main;
+    let picked: Vec<std::path::PathBuf> = files.iter().map(|f| std::path::PathBuf::from(&f.path)).collect();
+    let compare = crate::pairs::for_files(&picked);
+    if let Some(s) = compare_slot_files(&compare, &picked) {
+        main.push(s);
+    }
+
     let first = fam(fam_ids[0]);
     let (hub_title, hub_subtitle) = if files.len() == 1 {
         // A RAW photo shows its megapixels ("RAW photo · 24 MP"), which says more than its size.
@@ -455,6 +467,7 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         selected: paths.to_vec(),
         folder: None,
         scan: None,
+        compare,
     })
 }
 
@@ -471,7 +484,16 @@ fn build_folder_with(scan: std::sync::Arc<crate::folder::Scan>, accent: Option<S
         let hidden = if scan.alone.is_empty() { String::new() } else { format!(" (only {}: {})", if scan.alone.len() == 1 { "1 file that's left alone" } else { "files that are left alone" }, scan.alone_words()) };
         return Err(format!("{name} is empty{hidden}."));
     }
-    let (main, more) = folder::slots(&scan, &d, prefs);
+    let (mut main, mut more) = folder::slots(&scan, &d, prefs);
+    let compare = crate::pairs::for_folders(&scan.roots, Some(&scan));
+    // Inside the Holding Area nothing gets converted: only Zip, and Compare.
+    if scan.roots.iter().any(|r| in_holding_area(r)) {
+        main.retain(|s| s.id == folder::Action::Zip.id());
+        more.clear();
+    }
+    if let Some(s) = compare_slot_folder(&compare, &name) {
+        main.push(s);
+    }
     // Counts without subfolders, for Shift+click's "Include subfolders".
     let top = folder::Defaults { subfolders: false, ..d };
     let mut top_counts = std::collections::BTreeMap::new();
@@ -530,6 +552,7 @@ fn build_folder_with(scan: std::sync::Arc<crate::folder::Scan>, accent: Option<S
         selected: scan.roots.iter().map(|r| r.to_string_lossy().into_owned()).collect(),
         folder: Some(view),
         scan: Some(scan),
+        compare,
     })
 }
 
@@ -560,7 +583,110 @@ pub fn scanning_folder(roots: &[std::path::PathBuf], found: usize, accent: Optio
         selected: roots.iter().map(|r| r.to_string_lossy().into_owned()).collect(),
         folder: Some(FolderView { name, roots: roots.iter().map(|r| r.to_string_lossy().into_owned()).collect(), blank, scanning: Some(found), defaults: prefs.folder, ..FolderView::default() }),
         scan: None,
+        compare: Vec::new(),
     }
+}
+
+// ---------- the Compare slot ----------
+
+/// A folder inside a Holding Area (`_Quarantine`).
+fn in_holding_area(p: &std::path::Path) -> bool {
+    p.ancestors().any(|a| a.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(crate::holding::DIR)))
+}
+
+fn maker_words(maker: &str) -> &'static str {
+    match maker {
+        crate::pairs::DRIVE_CLEANUP => "Drive Cleanup",
+        crate::pairs::CONVERTINO => "Convertino",
+        crate::pairs::TRIMOTHY => "Trimothy",
+        _ => "Convertino",
+    }
+}
+
+/// "Drive Cleanup, 11 Oct" / "Drive Cleanup and Convertino" for a set of pairs.
+fn made_by(pairs: &[crate::pairs::Pair]) -> String {
+    let mut who: Vec<&str> = Vec::new();
+    for p in pairs.iter().filter(|p| p.batch_dir.is_some() || p.maker != crate::pairs::BESIDE) {
+        let w = maker_words(&p.maker);
+        if !who.contains(&w) {
+            who.push(w);
+        }
+    }
+    match who.len() {
+        0 => String::new(),
+        1 => who[0].to_string(),
+        _ => format!("{} and {}", who[..who.len() - 1].join(", "), who[who.len() - 1]),
+    }
+}
+
+fn flagged_words(pairs: &[crate::pairs::Pair]) -> Option<String> {
+    let n = pairs.iter().filter(|p| p.flag.is_some()).count();
+    (n > 0).then(|| if pairs.len() == 1 { "Its copy didn't pass the automatic check".to_string() } else { format!("{n} didn't pass the automatic check") })
+}
+
+fn compare_slot(sub: String, hint: String, detail: Option<String>, count: usize) -> Slot {
+    Slot { id: "compare".into(), label: "Compare".into(), icon: "compare".into(), hint, family: "compare".into(), kind: SlotKind::Compare, count, sub: Some(sub), detail, ..Slot::default() }
+}
+
+/// The Compare slot for selected files, when any of them has a compressed copy (or is one).
+fn compare_slot_files(pairs: &[crate::pairs::Pair], picked: &[std::path::PathBuf]) -> Option<Slot> {
+    if pairs.is_empty() {
+        return None;
+    }
+    let n = pairs.len();
+    let with = |p: &std::path::Path| pairs.iter().any(|x| crate::pairs::key(&x.original) == crate::pairs::key(p) || crate::pairs::key(&x.copy) == crate::pairs::key(p));
+    let without = picked.iter().filter(|p| !with(p)).count();
+    let who = made_by(pairs);
+    let mut lines: Vec<String> = Vec::new();
+    let (sub, hint) = if n == 1 && picked.len() == 1 {
+        let p = &pairs[0];
+        let is_original = crate::pairs::key(&picked[0]) == crate::pairs::key(&p.original);
+        let size = |q: &std::path::Path| human_size(std::fs::metadata(q).map(|m| m.len()).unwrap_or(0));
+        let place = if p.maker == crate::pairs::BESIDE { "right beside it".to_string() } else if is_original { "in its place".to_string() } else { "in the Holding Area".to_string() };
+        let mut line = if is_original { format!("{} copy {place}", size(&p.copy)) } else { format!("{} original {place}", size(&p.original)) };
+        if !who.is_empty() && p.maker != crate::pairs::BESIDE {
+            line.push_str(&format!(" · {who}"));
+        }
+        lines.push(line);
+        if is_original {
+            ("with copy".to_string(), "Compare with its compressed copy".to_string())
+        } else {
+            ("with original".to_string(), "Compare with the original".to_string())
+        }
+    } else {
+        if without > 0 {
+            lines.push(format!("{without} of the {} selected {} no compressed copy, so {} left out", picked.len(), if without == 1 { "has" } else { "have" }, if without == 1 { "it's" } else { "they're" }));
+        }
+        if !who.is_empty() {
+            lines.push(format!("Made by {who}"));
+        }
+        (if without > 0 { format!("{n} of {}", picked.len()) } else { format!("{n} pairs") }, format!("Compare {n} compressed {}", if n == 1 { "copy" } else { "copies" }))
+    };
+    if let Some(f) = flagged_words(pairs) {
+        lines.push(f);
+    }
+    Some(compare_slot(sub, hint, (!lines.is_empty()).then(|| lines.join(" · ")), n))
+}
+
+/// The Compare slot for a folder: every pair inside it, subfolders included.
+fn compare_slot_folder(pairs: &[crate::pairs::Pair], name: &str) -> Option<Slot> {
+    if pairs.is_empty() {
+        return None;
+    }
+    let n = pairs.len();
+    let held = pairs.iter().filter(|p| p.batch_dir.is_some()).count();
+    let mut lines = vec![format!(
+        "In {name} and its subfolders · {}",
+        if held == n { "originals in the Holding Area".to_string() } else if held == 0 { "originals beside their copies".to_string() } else { format!("{held} originals in the Holding Area, {} beside their copies", n - held) }
+    )];
+    let who = made_by(pairs);
+    if !who.is_empty() {
+        lines.push(format!("Made by {who}"));
+    }
+    if let Some(f) = flagged_words(pairs) {
+        lines.push(f);
+    }
+    Some(compare_slot(if n == 1 { "1 copy".into() } else { format!("{n} copies") }, format!("Compare {n} compressed {}", if n == 1 { "copy" } else { "copies" }), Some(lines.join(" · ")), n))
 }
 
 fn file_name_of(p: &std::path::Path) -> String {
@@ -710,6 +836,64 @@ mod tests {
         let p = std::env::temp_dir().join(name);
         std::fs::write(&p, b"x").unwrap();
         p.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn compare_slot_is_last_and_only_with_a_copy() {
+        let d = std::env::temp_dir().join(format!("convertino-wheel-cmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let (o, c, lone) = (d.join("clip.mp4"), d.join("clip (compressed).mp4"), d.join("other.mp4"));
+        for p in [&o, &c, &lone] {
+            std::fs::write(p, b"x").unwrap();
+        }
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        let m = build(&[s(&o)], None).unwrap();
+        let last = m.main.last().unwrap();
+        assert_eq!((last.kind.clone(), last.sub.as_deref()), (SlotKind::Compare, Some("with copy")));
+        assert_eq!(m.compare.len(), 1);
+        assert!(m.main[..m.main.len() - 1].iter().all(|x| x.kind != SlotKind::Compare), "the other slots keep their places");
+        let m = build(&[s(&c)], None).unwrap();
+        assert_eq!(m.main.last().unwrap().sub.as_deref(), Some("with original"));
+        let m = build(&[s(&o), s(&lone)], None).unwrap();
+        let last = m.main.last().unwrap();
+        assert_eq!(last.sub.as_deref(), Some("1 of 2"));
+        assert!(last.detail.as_deref().unwrap_or("").contains("1 of the 2 selected has no compressed copy"));
+        let m = build(&[s(&lone)], None).unwrap();
+        assert!(m.compare.is_empty() && m.main.iter().all(|x| x.kind != SlotKind::Compare));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn folder_compare_counts_pairs_and_a_holding_area_folder_only_zips() {
+        use std::sync::atomic::AtomicBool;
+        let d = std::env::temp_dir().join(format!("convertino-wheel-fcmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let clips = d.join("Clips");
+        let sub = clips.join("Old");
+        std::fs::create_dir_all(&sub).unwrap();
+        for p in [clips.join("a.mp4"), clips.join("a (compressed).mp4"), sub.join("b.mov"), sub.join("b (compressed).mp4"), clips.join("c.mp4")] {
+            std::fs::write(p, b"x").unwrap();
+        }
+        let scan = crate::folder::scan(std::slice::from_ref(&clips), &AtomicBool::new(false), &|_| {}).unwrap();
+        let m = build_folder(std::sync::Arc::new(scan), None, false).unwrap();
+        let last = m.main.last().unwrap();
+        assert_eq!((last.kind.clone(), last.sub.as_deref()), (SlotKind::Compare, Some("2 copies")));
+        assert!(m.main.len() > 2, "the usual folder slots stay");
+        // A batch folder in the Holding Area: nothing is converted there.
+        let batch = d.join(crate::holding::DIR).join("shrink-2026-10-11-09-58-57");
+        std::fs::create_dir_all(batch.join("Clips")).unwrap();
+        let (held, copy) = (batch.join("Clips").join("d.mp4"), clips.join("d.mp4"));
+        std::fs::write(&held, b"x").unwrap();
+        std::fs::write(&copy, b"x").unwrap();
+        let man = serde_json::json!({ "batch": "shrink-2026-10-11-09-58-57", "kind": "shrink", "createdAt": 1, "entries": [ { "from": copy.to_string_lossy(), "to": held.to_string_lossy(), "isDir": false, "replaced": copy.to_string_lossy() } ] });
+        std::fs::write(batch.join("manifest.json"), man.to_string()).unwrap();
+        let scan = crate::folder::scan(std::slice::from_ref(&batch), &AtomicBool::new(false), &|_| {}).unwrap();
+        let m = build_folder(std::sync::Arc::new(scan), None, false).unwrap();
+        let ids: Vec<&str> = m.main.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["folder.zip", "compare"]);
+        assert_eq!(m.main[1].sub.as_deref(), Some("1 copy"));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

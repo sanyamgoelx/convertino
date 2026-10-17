@@ -157,18 +157,21 @@ html, body {
 .hint .ht { font-weight: 600; }
 .hint .hs { color: var(--ink-2); }
 .hint .hk { width: 100%; text-align: center; font-size: 11.5px; color: var(--ink-3); }
+.hint .hl { width: 100%; text-align: center; }
+.hint .hw { width: 100%; text-align: center; font-size: 12px; color: #b26a00; }
+@media (prefers-color-scheme: dark) { .hint .hw { color: #f0b45a; } }
 :root[data-os="mac"] .hint { border-radius: 10px; }
 
 /* After a pick the wheel collapses into its centre... */
 .wheel.collapsing { transform: scale(0.22); opacity: 0; transition: transform 0.18s cubic-bezier(0.4, 0, 1, 1), opacity 0.16s ease-in; }
 
-/* ...and the window shrinks to 380 × 120 around the progress ring, centred at
+/* ...and the window shrinks to 460 × 120 around the progress ring, centred at
    (56, 60), or at (324, 60) with its label on the left near the right edge of
    the screen. Keep in sync with RING_* in lib.rs. */
 body.ringmode .wheel, body.ringmode .hint { display: none; }
 .ring { display: none; position: absolute; left: 20px; top: 24px; width: 72px; height: 72px; }
 body.ringmode .ring { display: block; }
-.ring.flip { left: 288px; }
+.ring.flip { left: 368px; }
 .ring { opacity: 0; transform: scale(1.6); transition: transform 0.2s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.16s ease-out; }
 .ring.show { opacity: 1; transform: scale(1); }
 .ring.leave { opacity: 0; transform: scale(0.9); transition-duration: 0.2s; }
@@ -196,7 +199,7 @@ body.ringmode .ring { display: block; }
 }
 .ring.flip .ring-pill { left: auto; right: 82px; }
 .ring.done .ring-pill { opacity: 1; pointer-events: auto; }
-.ring-text { color: var(--ink-2); max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.ring-text { color: var(--ink-2); max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 .ring-pill button {
   font: inherit; font-size: 12.5px; height: 28px; padding: 0 12px; border-radius: 4px;
   border: 1px solid var(--line); background: var(--hub-bg); color: var(--ink); cursor: pointer;
@@ -286,7 +289,7 @@ body.with-opts .wheel { opacity: 0.55; transition: opacity 0.15s; }
 .hint-btn { height: 26px; padding: 0 12px; border-radius: 5px; font-size: 12px; }
 .size-hub button:focus-visible, .hint-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root[data-os="mac"] .hint-btn { border-radius: 7px; }
-.ring.wide .ring-text { max-width: 130px; }
+.ring.wide .ring-text { max-width: 100px; }
 
 /* Ask Claude: a pill on the wheel's bottom edge (only when Convertino is
    connected to Claude). The hint moves down to make room. */

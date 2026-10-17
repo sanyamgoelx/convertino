@@ -205,6 +205,10 @@ pub static ENABLED: AtomicBool = AtomicBool::new(true);
 pub static RING_ACTIVE: AtomicBool = AtomicBool::new(false);
 static ARMED: AtomicBool = AtomicBool::new(false);
 static TAP: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// True while the wheel itself is on screen. macOS won't let Convertino take
+/// the focus from Finder (cooperative activation), so the wheel can't rely on
+/// "lost focus" to close: clicks elsewhere close it through the tap instead.
+pub static WHEEL_SHOWN: AtomicBool = AtomicBool::new(false);
 /// The tap is running (Accessibility was granted).
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -261,11 +265,8 @@ extern "C" fn tap_callback(_proxy: CGEventTapProxy, kind: u32, event: CGEventRef
                 event
             }
             LEFT_DOWN => {
-                if RING_ACTIVE.load(Ordering::SeqCst) {
-                    let p = CGEventGetLocation(event);
-                    if let Some(away) = AWAY.get() {
-                        away(p.x, p.y);
-                    }
+                if RING_ACTIVE.load(Ordering::SeqCst) || WHEEL_SHOWN.load(Ordering::SeqCst) {
+                    away_later(CGEventGetLocation(event));
                 }
                 event
             }
@@ -276,6 +277,9 @@ extern "C" fn tap_callback(_proxy: CGEventTapProxy, kind: u32, event: CGEventRef
                     ARMED.store(true, Ordering::SeqCst);
                     std::ptr::null_mut() // swallowed: no context menu
                 } else {
+                    if RING_ACTIVE.load(Ordering::SeqCst) || WHEEL_SHOWN.load(Ordering::SeqCst) {
+                        away_later(CGEventGetLocation(event));
+                    }
                     event
                 }
             }
@@ -292,6 +296,16 @@ extern "C" fn tap_callback(_proxy: CGEventTapProxy, kind: u32, event: CGEventRef
             _ => event,
         }
     }
+}
+
+/// A click elsewhere while the wheel or the ring shows. Handled off the tap's
+/// thread: window calls go through the main thread and the tap must answer fast.
+fn away_later(p: CGPoint) {
+    std::thread::spawn(move || {
+        if let Some(away) = AWAY.get() {
+            away(p.x, p.y);
+        }
+    });
 }
 
 /// The top window under the point belongs to Finder (a Finder window or the desktop).
@@ -450,6 +464,9 @@ fn file_url_path(url: &str) -> Option<PathBuf> {
 // ---------------------------------------------------------------------------
 // Permissions
 
+/// Bundle identifier (tauri.conf.json "identifier").
+const BUNDLE_ID: &str = "com.crofty.convertino";
+
 /// Accessibility (System Settings > Privacy & Security > Accessibility): Option+right-click.
 pub fn accessibility_granted() -> bool {
     unsafe { AXIsProcessTrusted() }
@@ -458,6 +475,15 @@ pub fn accessibility_granted() -> bool {
 /// Shows macOS's own "Convertino would like to control this computer" prompt
 /// (it adds Convertino to the list), then opens the Accessibility settings.
 pub fn ask_accessibility() {
+    // The app is ad-hoc signed, so macOS ties the Accessibility switch to one
+    // exact build. After an update the list can still show Convertino switched
+    // on while this build isn't trusted. Clearing our own entry first lets the
+    // prompt below add the build that is running now (no admin password needed).
+    if !accessibility_granted() {
+        let _ = std::process::Command::new("/usr/bin/tccutil")
+            .args(["reset", "Accessibility", BUNDLE_ID])
+            .status();
+    }
     unsafe {
         let keys = [kAXTrustedCheckOptionPrompt as CFTypeRef];
         let values = [kCFBooleanTrue];

@@ -25,6 +25,7 @@ const ICONS = {
   gif: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 10.5a2 2 0 100 3h1v-1.5M12 10v4M15 14v-4h2.5M15 12h2"/>',
   level: '<path d="M4 12h2M8 8v8M12 4v16M16 8v8"/><path d="M3 20h18"/>',
   more: '<circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/>',
+  compare: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 3v18M7 10l-2 2 2 2M17 10l2 2-2 2"/>',
   back: '<path d="M10 6l-6 6 6 6M4 12h16"/>',
   pdf: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M8.5 16.5c2-1 4.5-5.5 3.5-6.5s-1 3 3.5 5"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13.5" r="3.2"/>',
@@ -55,6 +56,7 @@ const ringIn = document.getElementById("ring-in");
 const ringText = document.getElementById("ring-text");
 const ringUndo = document.getElementById("ring-undo");
 const ringCompare = document.getElementById("ring-compare");
+const ringShow = document.getElementById("ring-show");
 const RING_C = 2 * Math.PI * 32;     // circumference of the ring's arc
 const HANDOFF_MS = 2000;             // default; Settings can change it (model.handoffMs)
 const tauri = window.__TAURI__;
@@ -163,12 +165,24 @@ function setActive(i) {
     hintEl.innerHTML = `<span class="hs">Point at a format${skipped}</span><span class="hk">1–${Math.min(9, slots.length)} to pick · arrows to move · Esc to cancel</span>`;
     return;
   }
+  if (s.kind === "compare") return compareHint(s);
   const files = s.kind === "target" && s.count > 1 ? ` · ${s.count} files` : "";
   const how = s.kind !== "target" ? "Click to open" : OPTIONS[s.id] ? "Click to convert · Shift+click for options" : "Click to convert";
   hintEl.innerHTML =
     `<span class="ht">${s.tag ? esc(s.tag) + " → " : ""}${esc(s.label)}</span>` +
     `<span class="hs">${esc(s.hint)}${files}</span>` +
     `<span class="hk">${how}</span>`;
+}
+
+// ---------- Compare ----------
+// The last slot when compressed copies were found among what was clicked
+// (pairs.rs): opens the Compare window with each copy and its original.
+
+function compareHint(s) {
+  const lines = (s.detail || "").split(" · ").filter(Boolean);
+  hintEl.innerHTML = `<span class="ht">${esc(s.hint)}</span>` +
+    lines.map((l) => `<span class="${/didn't pass/.test(l) ? "hw" : "hs hl"}">${esc(l)}</span>`).join("") +
+    `<span class="hk">Click to open Compare</span>`;
 }
 
 // ---------- folders ----------
@@ -193,6 +207,7 @@ function folderHint(s) {
       `<span class="hk">1–${Math.min(9, slots.length)} to pick · Shift+click for options · Esc to cancel</span>`;
     return;
   }
+  if (s.kind === "compare") return compareHint(s);
   if (s.kind !== "target") {
     hintEl.innerHTML = `<span class="ht">${esc(s.label)}</span><span class="hs">${esc(s.hint)}</span><span class="hk">Click to open</span>`;
     return;
@@ -392,6 +407,7 @@ function choose(i, withOptions = false) {
   if (s.kind === "back") return showPage("main");
   if (s.kind === "size") return startSize(s.bytes, s.label, null);
   if (s.kind === "custom") return openCustom("");
+  if (s.kind === "compare") return animateOut(() => tauri && tauri.core.invoke("wheel_compare").catch((e) => console.error(e)));
   if (s.kind === "target" && COMPRESS.has(s.id)) return enterSize(s);
   if (isFolder()) {
     if (s.id === "folder.fit") return enterSize(s);
@@ -995,11 +1011,14 @@ function ringDone(d) {
   // "holiday-goa.jpg · 2.8 MB" -> "Saved holiday-goa.jpg"
   ringText.textContent = "Saved " + String(d.body).split(" · ")[0];
   ringUndo.hidden = !d.canUndo;
+  // Where it went: "Show in Finder" / "Show in folder" (just "Show" next to Compare) opens it with the file selected.
+  ringShow.hidden = !d.canUndo;
+  ringShow.textContent = d.compare ? "Show" : isMacUi() ? "Show in Finder" : "Show in folder";
   ringCompare.hidden = !d.compare;
   ringEl.classList.toggle("wide", !!d.compare);
   ringEl.classList.add("done");
   if (tauri) tauri.core.invoke("ring_interactive", { on: true });
-  scheduleFade(1600);
+  scheduleFade(4000);
 }
 
 function scheduleFade(ms) {
@@ -1046,6 +1065,12 @@ function resetRing() {
 
 ringEl.addEventListener("mouseenter", () => ring && ring.done && clearTimeout(ring.fade));
 ringEl.addEventListener("mouseleave", () => ring && ring.done && scheduleFade(900));
+ringShow.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!ring || !ring.done) return;
+  if (tauri) tauri.core.invoke("job_reveal", { id: ring.id }).catch(() => {});
+  fadeRing();
+});
 ringCompare.addEventListener("click", (e) => {
   e.stopPropagation();
   if (!ring || !ring.done) return;
@@ -1061,6 +1086,7 @@ ringUndo.addEventListener("click", async (e) => {
     ringIn.innerHTML = UNDONE;
     ringText.textContent = isMacUi() ? "Moved to the Trash" : "Moved to the Recycle Bin";
     ringUndo.hidden = true;
+    ringShow.hidden = true;
   } catch (err) {
     ringText.textContent = String(err);
     ringUndo.disabled = false;

@@ -463,6 +463,11 @@ pub fn reveal(id: u64) -> Result<(), String> {
         .ok()
         .and_then(|o| o.get(&id).and_then(|v| v.first().cloned()))
         .ok_or("Nothing to show")?;
+    select_in_folder(&first)
+}
+
+/// Opens the file's folder in Explorer / Finder with the file selected.
+pub fn select_in_folder(first: &std::path::Path) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -473,7 +478,7 @@ pub fn reveal(id: u64) -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg("-R").arg(&first).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("open").arg("-R").arg(first).spawn().map_err(|e| e.to_string())?;
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {

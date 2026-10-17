@@ -24,6 +24,7 @@ mod holding;
 mod image_edit;
 mod install;
 mod jobs;
+mod pairs;
 mod look;
 mod mcp;
 mod procs;
@@ -79,7 +80,7 @@ const WHEEL_CY: f64 = 190.0;
 /// The same window while it shows the progress ring: small, so it covers
 /// nothing, with the ring's centre at (RING_CX, RING_CY) and its label to the right
 /// (or to the left, mirrored, near the right edge of the screen). Keep in sync with ui/wheel.css.
-const RING_WIN_W: f64 = 380.0;
+const RING_WIN_W: f64 = 460.0;
 const RING_WIN_H: f64 = 120.0;
 const RING_CX: f64 = 56.0;
 const RING_CY: f64 = 60.0;
@@ -323,26 +324,45 @@ async fn compress_preview(app: AppHandle, target_id: String, family: String, byt
     .map_err(|e| e.to_string())?
 }
 
-/// Opens the Compare window for a finished Compress job.
+/// Opens the Compare window for a finished Compress job (or Settings' test).
 #[tauri::command]
 fn compare_open(app: AppHandle, id: u64) -> Result<(), String> {
-    if jobs::compare_pairs(id).is_empty() {
+    if compare::session(id).is_empty() {
         return Err("There's nothing to compare.".into());
     }
-    // Already open: show this job in it.
+    open_compare(&app, id);
+    Ok(())
+}
+
+/// The wheel's Compare slot: the compressed copies found among what was clicked.
+#[tauri::command]
+fn wheel_compare(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    hide_wheel(&app);
+    let list = state.wheel.lock().ok().and_then(|w| w.as_ref().map(|m| m.compare.clone())).unwrap_or_default();
+    if list.is_empty() {
+        return Err("There's nothing to compare.".into());
+    }
+    log::info!("compare: {} pair(s) from the wheel", list.len());
+    let id = compare::register(list);
+    open_compare(&app, id);
+    Ok(())
+}
+
+fn open_compare(app: &AppHandle, id: u64) {
+    // Already open: show this session in it.
     if let Some(w) = app.get_webview_window("compare") {
         let _ = w.eval(&format!("location.hash = '{id}'; location.reload();"));
         let _ = w.unminimize();
         let _ = w.set_focus();
-        return Ok(());
+        return;
     }
     let app = app.clone();
     // Built off the calling thread: creating a window inside a command can deadlock on Windows.
     std::thread::spawn(move || {
         let built = WebviewWindowBuilder::new(&app, "compare", WebviewUrl::App(format!("compare.html#{id}").into()))
             .title("Compare – Convertino")
-            .inner_size(1000.0, 760.0)
-            .min_inner_size(560.0, 420.0)
+            .inner_size(1200.0, 860.0)
+            .min_inner_size(720.0, 560.0)
             .center()
             .focused(true)
             .build();
@@ -350,7 +370,6 @@ fn compare_open(app: AppHandle, id: u64) -> Result<(), String> {
             log::error!("couldn't open Compare: {e}");
         }
     });
-    Ok(())
 }
 
 #[tauri::command]
@@ -360,10 +379,59 @@ fn compare_close(app: AppHandle) {
     }
 }
 
-/// One original/result pair of a Compress job as pictures the window can show.
+/// The pairs of a Compare session, as the window lists them (read live: marks and files may change).
 #[tauri::command]
-async fn compare_data(id: u64, index: usize) -> Result<compare::Pair, String> {
-    tauri::async_runtime::spawn_blocking(move || compare::pair(id, index)).await.map_err(|e| e.to_string())?
+async fn compare_session(id: u64) -> Result<compare::Session, String> {
+    tauri::async_runtime::spawn_blocking(move || compare::session_view(id)).await.map_err(|e| e.to_string())
+}
+
+/// Size, picture, frame rate, codecs, sound and length of both files of a pair.
+#[tauri::command]
+async fn compare_facts(id: u64, index: usize) -> Result<compare::PairFacts, String> {
+    tauri::async_runtime::spawn_blocking(move || compare::facts(id, index)).await.map_err(|e| e.to_string())?
+}
+
+/// The 8 checkpoints (one for a picture), scored like the copy check.
+#[tauri::command]
+async fn compare_points(id: u64, index: usize) -> Result<Vec<verify::Point>, String> {
+    tauri::async_runtime::spawn_blocking(move || compare::points(id, index)).await.map_err(|e| e.to_string())?
+}
+
+/// A still of one side ("o" or "c"): a picture, a PDF page or a video frame.
+#[tauri::command]
+async fn compare_still(id: u64, index: usize, side: String, at: f64) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || compare::still(id, index, &side, at)).await.map_err(|e| e.to_string())?
+}
+
+/// "Looks good": marks (or unmarks) the original for deletion; Drive Cleanup sees the same mark.
+#[tauri::command]
+fn compare_mark(id: u64, index: usize, on: bool) -> Result<bool, String> {
+    let p = compare::pair_of(id, index)?;
+    log::info!("compare: {} {}", if on { "marked" } else { "unmarked" }, p.original.display());
+    pairs::set_mark(&p.original, &p.copy, on)
+}
+
+/// Puts the original of one of Convertino's own Replace batches back.
+#[tauri::command]
+fn compare_put_back(id: u64, index: usize) -> Result<String, String> {
+    let p = compare::pair_of(id, index)?;
+    let said = pairs::put_back(&p)?;
+    log::info!("compare: put back {}", p.original.display());
+    Ok(said)
+}
+
+/// Opens Drive Cleanup on this pair (it puts back or deletes the originals of its batches).
+#[tauri::command]
+fn compare_drive_cleanup(id: u64, index: usize) -> Result<(), String> {
+    let p = compare::pair_of(id, index)?;
+    pairs::open_in_drive_cleanup(&p.original)
+}
+
+/// Shows one side of a pair in Explorer / Finder.
+#[tauri::command]
+fn compare_show(id: u64, index: usize, side: String) -> Result<(), String> {
+    let p = compare::pair_of(id, index)?;
+    jobs::select_in_folder(if side == "o" { &p.original } else { &p.copy })
 }
 
 /// After the wheel's collapse animation: shrink the window around the ring,
@@ -450,6 +518,8 @@ fn end_ring(app: &AppHandle) {
     }
     #[cfg(any(windows, target_os = "macos"))]
     alt_click::RING_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(target_os = "macos")]
+    mac::WHEEL_SHOWN.store(false, std::sync::atomic::Ordering::SeqCst);
     if let Some(win) = app.get_webview_window("wheel") {
         let _ = win.hide();
         let _ = win.set_ignore_cursor_events(false);
@@ -475,16 +545,25 @@ fn on_click_while_ring(app: &AppHandle, x: i32, y: i32) {
 #[cfg(target_os = "macos")]
 fn on_click_while_ring(app: &AppHandle, x: f64, y: f64) {
     let Some(win) = app.get_webview_window("wheel") else { return };
-    let scale = win.scale_factor().unwrap_or(1.0);
-    if let (Ok(pos), Ok(size)) = (win.outer_position(), win.outer_size()) {
-        let (px, py) = (x * scale, y * scale);
-        let inside = px >= pos.x as f64 && py >= pos.y as f64 && px < (pos.x + size.width as i32) as f64 && py < (pos.y + size.height as i32) as f64;
+    if let (Some(c), Ok(pos), Ok(size)) = (mac_point_to_physical(app, x, y), win.outer_position(), win.outer_size()) {
+        let inside = c.x >= pos.x as f64 && c.y >= pos.y as f64 && c.x < (pos.x + size.width as i32) as f64 && c.y < (pos.y + size.height as i32) as f64;
         if inside {
             return;
         }
     }
-    let _ = win.emit("ring-away", ());
+    let ring = app.state::<AppState>().ring.lock().ok().and_then(|r| *r);
+    if ring.is_some() {
+        let _ = win.emit("ring-away", ());
+    } else if mac::WHEEL_SHOWN.load(std::sync::atomic::Ordering::SeqCst) {
+        log::info!("wheel: click elsewhere, closing");
+        hide_wheel(app);
+    }
 }
+
+/// When the wheel last opened: macOS can report "lost focus" right after it
+/// shows (Convertino may not take the focus from Finder), which must not close it.
+#[cfg(target_os = "macos")]
+static WHEEL_OPENED: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
 
 #[tauri::command]
 fn job_reveal(id: u64) -> Result<(), String> {
@@ -539,7 +618,7 @@ fn place_hud(app: &AppHandle, height: f64) {
     let Some(win) = app.get_webview_window("hud") else { return };
     let cursor = app.cursor_position().ok();
     let monitor = cursor
-        .and_then(|c| app.monitor_from_point(c.x, c.y).ok().flatten())
+        .and_then(|c| monitor_at(app, c))
         .or_else(|| win.primary_monitor().ok().flatten());
     let Some(m) = monitor else { return };
     let scale = m.scale_factor();
@@ -551,6 +630,7 @@ fn place_hud(app: &AppHandle, height: f64) {
     } else {
         area.position.y as f64 + area.size.height as f64 - h - gap
     };
+    log::info!("corner card at {:.0},{:.0} on a {}x{} work area (scale {scale})", x, y, area.size.width, area.size.height);
     let _ = win.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
 }
 
@@ -1497,8 +1577,41 @@ fn on_option_click(app: &AppHandle, x: f64, y: f64) {
             }
         },
     };
-    let cursor = app.cursor_position().ok();
+    // Use the click's own point (points, top-left of the main display), turned
+    // into physical pixels on the display it's on, not a fresh cursor lookup.
+    let cursor = mac_point_to_physical(app, x, y).or_else(|| app.cursor_position().ok());
     open_for_selection(app, selection, started, cursor, "option-click");
+}
+
+/// A Quartz point (macOS points) as Tauri physical pixels: points × the scale
+/// of the display that holds the point (the same rule on_click_while_ring uses).
+#[cfg(target_os = "macos")]
+fn mac_point_to_physical(app: &AppHandle, x: f64, y: f64) -> Option<PhysicalPosition<f64>> {
+    let monitors = app.available_monitors().ok()?;
+    for m in &monitors {
+        let s = m.scale_factor();
+        let (p, z) = (m.position(), m.size());
+        let (lx, ly) = (p.x as f64 / s, p.y as f64 / s);
+        let (lw, lh) = (z.width as f64 / s, z.height as f64 / s);
+        if x >= lx && x < lx + lw && y >= ly && y < ly + lh {
+            return Some(PhysicalPosition::new(x * s, y * s));
+        }
+    }
+    let s = monitors.first().map(|m| m.scale_factor()).unwrap_or(1.0);
+    Some(PhysicalPosition::new(x * s, y * s))
+}
+
+/// The display whose physical rectangle holds the point (falls back to Tauri's lookup).
+fn monitor_at(app: &AppHandle, c: PhysicalPosition<f64>) -> Option<tauri::Monitor> {
+    if let Ok(list) = app.available_monitors() {
+        for m in list {
+            let (p, z) = (m.position(), m.size());
+            if c.x >= p.x as f64 && c.x < p.x as f64 + z.width as f64 && c.y >= p.y as f64 && c.y < p.y as f64 + z.height as f64 {
+                return Some(m);
+            }
+        }
+    }
+    app.monitor_from_point(c.x, c.y).ok().flatten()
 }
 
 /// Mac permissions, for the Permissions page of Settings.
@@ -1672,8 +1785,9 @@ fn open_wheel(app: &AppHandle, model: WheelModel, cursor: Option<PhysicalPositio
     // Centre the wheel on the cursor, kept inside the screen's work area.
     let cursor = cursor.or_else(|| app.cursor_position().ok());
     if let Some(c) = cursor {
-        let monitor = app.monitor_from_point(c.x, c.y).ok().flatten();
+        let monitor = monitor_at(app, c);
         let scale = monitor.as_ref().map(|m| m.scale_factor()).unwrap_or(1.0);
+        log::info!("wheel at {:.0},{:.0} (scale {scale})", c.x, c.y);
         let (w, h) = (WHEEL_WIN_W * scale, WHEEL_WIN_H * scale);
         let mut x = c.x - WHEEL_CX * scale;
         let mut y = c.y - WHEEL_CY * scale;
@@ -1688,11 +1802,20 @@ fn open_wheel(app: &AppHandle, model: WheelModel, cursor: Option<PhysicalPositio
     }
 
     let _ = win.emit("wheel-open", model);
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(mut t) = WHEEL_OPENED.lock() {
+            *t = Some(Instant::now());
+        }
+        mac::WHEEL_SHOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     let _ = win.show();
     let _ = win.set_focus();
 }
 
 fn hide_wheel(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    mac::WHEEL_SHOWN.store(false, std::sync::atomic::Ordering::SeqCst);
     if let Some(win) = app.get_webview_window("wheel") {
         let _ = win.hide();
     }
@@ -1714,6 +1837,10 @@ pub fn cli_main() -> i32 {
 
 pub fn run() {
     tauri::Builder::default()
+        // Compare streams the two videos of a pair from here (only files of an open session).
+        .register_asynchronous_uri_scheme_protocol("cvmedia", |_ctx, request, responder| {
+            std::thread::spawn(move || responder.respond(compare::media_response(&request)));
+        })
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -1767,8 +1894,16 @@ pub fn run() {
             presets_apply,
             compress_preview,
             compare_open,
-            compare_data,
+            wheel_compare,
             compare_close,
+            compare_session,
+            compare_facts,
+            compare_points,
+            compare_still,
+            compare_mark,
+            compare_put_back,
+            compare_drive_cleanup,
+            compare_show,
             ring_mode,
             ring_interactive,
             ring_handoff,
@@ -1895,7 +2030,19 @@ pub fn run() {
             // (Not while it shows the progress ring, which gives focus back on purpose.)
             ("wheel", WindowEvent::Focused(false)) => {
                 let ring = window.app_handle().state::<AppState>().ring.lock().ok().and_then(|r| *r);
+                // Mac: a "lost focus" right after opening means macOS kept Finder
+                // in front; the wheel stays, and a click elsewhere closes it (tap).
+                #[cfg(target_os = "macos")]
+                {
+                    let since = WHEEL_OPENED.lock().ok().and_then(|t| *t).map(|t| t.elapsed());
+                    if since.is_some_and(|d| d < std::time::Duration::from_millis(800)) {
+                        log::info!("wheel: lost focus {} ms after opening, kept open", since.unwrap().as_millis());
+                        return;
+                    }
+                }
                 if ring.is_none() {
+                    #[cfg(target_os = "macos")]
+                    mac::WHEEL_SHOWN.store(false, std::sync::atomic::Ordering::SeqCst);
                     let _ = window.hide();
                 }
             }

@@ -149,8 +149,13 @@ fn ssim(a: &[u8], b: &[u8], w: usize, h: usize) -> f64 {
 
 /// SSIM of one frame of `a` and `b` at `t`; Err when no comparison was possible at all.
 fn similarity(ff: &Path, a: &Path, b: &Path, t: f64, picture: bool) -> Result<f64, String> {
+    similarity_at(ff, a, t, b, t, picture)
+}
+
+/// SSIM of `a` at `ta` and `b` at `tb` (a test sample starts later in its original).
+fn similarity_at(ff: &Path, a: &Path, ta: f64, b: &Path, t: f64, picture: bool) -> Result<f64, String> {
     let fail = || format!("The new copy couldn't be compared with the original around {t:.0} s, so the original was kept");
-    let fa = frame_at(ff, a, t, true)?.ok_or_else(fail)?;
+    let fa = frame_at(ff, a, ta, true)?.ok_or_else(fail)?;
     let mut best = None;
     if !picture {
         if let Some(fb) = frame_at(ff, b, t, true)? {
@@ -186,6 +191,33 @@ fn plays(ff: &Path, p: &Path, at: f64, video: bool) -> Result<bool, String> {
 
 fn probe(p: &Path) -> Result<Probe, String> {
     video::probe(p).map_err(|_| "The new copy couldn't be read".to_string())
+}
+
+/// One of Compare's checkpoints: where in the copy, and how alike (0..1; None: no frame there).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Point {
+    pub t: f64,
+    pub s: Option<f64>,
+}
+
+/// Where the copy check looks: 8 points spread over the copy (same as `copy_ok`).
+pub fn checkpoint_times(duration: f64) -> Vec<f64> {
+    (0..FRAMES).map(|i| (duration * (0.03 + 0.94 * i as f64 / (FRAMES - 1) as f64)).min((duration - 1.0).max(0.0)).max(0.0)).collect()
+}
+
+/// Compare's checkpoints: the same frames the copy check compares, scored the same way.
+/// `offset`: the copy starts this many seconds into the original. A picture gets one point.
+pub fn checkpoints(original: &Path, copy: &Path, offset: f64) -> Result<Vec<Point>, String> {
+    let ff = tools::require(Tool::Ffmpeg)?;
+    if family(copy).as_deref() == Some("image") || family(original).as_deref() == Some("image") {
+        let s = similarity_at(&ff, original, 0.0, copy, 0.0, true).ok();
+        return Ok(vec![Point { t: 0.0, s }]);
+    }
+    let d = probe(copy)?.duration.ok_or("The copy's length couldn't be read")?;
+    Ok(checkpoint_times(d)
+        .into_iter()
+        .map(|t| Point { t, s: similarity_at(&ff, original, t + offset, copy, t, false).ok() })
+        .collect())
 }
 
 /// Is `made` a sound replacement for `original`? Err says why not.
@@ -224,8 +256,7 @@ pub fn copy_ok(original: &Path, made: &Path) -> Result<(), String> {
         if (ra - rb).abs() > 0.01 * ra {
             return Err(format!("The picture's shape changed ({}×{} → {}×{})", a.width, a.height, b.width, b.height));
         }
-        for i in 0..FRAMES {
-            let t = (db * (0.03 + 0.94 * i as f64 / (FRAMES - 1) as f64)).min((db - 1.0).max(0.0)).max(0.0);
+        for t in checkpoint_times(db) {
             let s = similarity(&ff, original, made, t, fm.as_deref() == Some("image"))?;
             if s < MIN_MATCH {
                 return Err(format!("The new copy doesn't look like the original around {t:.0} s (match {:.0}%)", s * 100.0));
@@ -301,6 +332,28 @@ mod tests {
         let theirs: f64 = text.lines().rev().find_map(|l| l.split("All:").nth(1)).and_then(|r| r.split_whitespace().next()?.parse().ok()).unwrap();
         assert!((ours - theirs).abs() < 0.001, "ours {ours}, FFmpeg {theirs}");
         assert!(ours > 0.8 && ours < 1.0, "{ours}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn checkpoints_score_a_good_copy_high_and_a_flipped_one_low() {
+        let Some(ff) = ff() else { return };
+        let d = dir("points");
+        let src = d.join("src.mov");
+        let s = src.to_string_lossy().into_owned();
+        run(&ff, &["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=8", "-c:v", "mpeg4", "-q:v", "3", &s]);
+        let good = d.join("good.mp4");
+        run(&ff, &["-i", &s, "-c:v", "mpeg4", "-q:v", "12", &good.to_string_lossy()]);
+        let pts = checkpoints(&src, &good, 0.0).unwrap();
+        assert_eq!(pts.len(), 8);
+        assert!(pts.iter().all(|p| p.s.is_some_and(|s| s > 0.8)), "{pts:?}");
+        let flipped = d.join("flipped.mp4");
+        run(&ff, &["-i", &s, "-c:v", "mpeg4", "-vf", "vflip,hflip", &flipped.to_string_lossy()]);
+        assert!(checkpoints(&src, &flipped, 0.0).unwrap().iter().all(|p| p.s.is_some_and(|s| s < 0.6)));
+        // A test sample: 3 s from 4 s into the original, lined up by the offset.
+        let clip = d.join("clip.mp4");
+        run(&ff, &["-ss", "4", "-i", &s, "-t", "3", "-c:v", "mpeg4", "-q:v", "6", &clip.to_string_lossy()]);
+        assert!(checkpoints(&src, &clip, 4.0).unwrap().iter().all(|p| p.s.is_some_and(|s| s > 0.8)));
         let _ = std::fs::remove_dir_all(&d);
     }
 
