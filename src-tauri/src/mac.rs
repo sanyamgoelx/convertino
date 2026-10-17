@@ -480,6 +480,12 @@ pub fn ask_accessibility() {
 /// Permission to ask Finder for its selection (Automation). "granted",
 /// "denied", "not-asked", or "unknown" (e.g. Finder isn't running).
 /// With `ask`, macOS shows its prompt if it hasn't yet (this blocks until answered).
+///
+/// We ask about the event we actually send, `core`/`getd` (AppleScript's
+/// `get selection`), not the `****`/`****` wildcard: with the wildcard macOS
+/// often returns -1744 without ever showing the prompt, so Convertino never
+/// gets an entry under Privacy & Security > Automation and the Allow button
+/// does nothing.
 pub fn finder_automation(ask: bool) -> &'static str {
     let id = b"com.apple.finder";
     unsafe {
@@ -487,7 +493,7 @@ pub fn finder_automation(ask: bool) -> &'static str {
         if AECreateDesc(fourcc(b"bund"), id.as_ptr() as *const c_void, id.len() as isize, &mut desc) != 0 {
             return "unknown";
         }
-        let r = AEDeterminePermissionToAutomateTarget(&desc, fourcc(b"****"), fourcc(b"****"), ask);
+        let r = AEDeterminePermissionToAutomateTarget(&desc, fourcc(b"core"), fourcc(b"getd"), ask);
         AEDisposeDesc(&mut desc);
         match r {
             0 => "granted",
@@ -496,6 +502,17 @@ pub fn finder_automation(ask: bool) -> &'static str {
             _ => "unknown",
         }
     }
+}
+
+/// Sends Finder a real, harmless Apple Event (`get name`). macOS always shows
+/// the "control Finder" prompt for a real event it hasn't been asked about,
+/// and adds Convertino to the Automation list, even on systems where
+/// AEDeterminePermissionToAutomateTarget won't prompt. Blocks until answered.
+fn poke_finder() {
+    let _ = std::process::Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(r#"tell application "Finder" to get name"#)
+        .output();
 }
 
 /// Opens a Privacy & Security pane of System Settings.
@@ -508,5 +525,12 @@ pub fn open_settings(anchor: &str) {
 pub fn ask_finder_once() -> &'static str {
     static ONE: Mutex<()> = Mutex::new(());
     let _g = ONE.lock().unwrap_or_else(|e| e.into_inner());
-    finder_automation(true)
+    let state = finder_automation(true);
+    if state == "granted" || state == "denied" {
+        return state;
+    }
+    // Still undecided (or Finder looked unreachable): the prompt didn't show.
+    // Send a real event so it does, then read the answer back.
+    poke_finder();
+    finder_automation(false)
 }
