@@ -1,4 +1,7 @@
 ﻿# Runs the Rust tests (wheel layout, real conversions, the convertino command and its MCP server) and mirrors the output to logs\test.log.
+# Builds and tests run below normal priority (the programs they start inherit it),
+# so games and other apps stay smooth while they work.
+try { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' } catch {}
 $root = Split-Path -Parent $PSScriptRoot
 $log = Join-Path $root 'logs\test.log'
 Set-Location (Join-Path $root 'src-tauri')

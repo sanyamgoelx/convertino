@@ -45,7 +45,7 @@ impl Pack {
             Tool::SevenZip => Pack::SevenZip,
             Tool::Ffmpeg => Pack::Ffmpeg,
             Tool::Magick => Pack::Magick,
-            Tool::Pdftoppm | Tool::Pdftotext | Tool::Pdfseparate | Tool::Pdfunite => Pack::Poppler,
+            Tool::Pdftoppm | Tool::Pdftotext | Tool::Pdfseparate | Tool::Pdfunite | Tool::Pdfimages => Pack::Poppler,
             Tool::Ghostscript => Pack::Ghostscript,
             Tool::Pandoc => Pack::Pandoc,
             Tool::LibreOffice => Pack::LibreOffice,
@@ -84,7 +84,7 @@ impl Pack {
     /// Every program of the pack Convertino runs.
     fn tools(self) -> &'static [Tool] {
         match self {
-            Pack::Poppler => &[Tool::Pdftoppm, Tool::Pdftotext, Tool::Pdfseparate, Tool::Pdfunite],
+            Pack::Poppler => &[Tool::Pdftoppm, Tool::Pdftotext, Tool::Pdfseparate, Tool::Pdfunite, Tool::Pdfimages],
             Pack::SevenZip => &[Tool::SevenZip],
             Pack::Ffmpeg => &[Tool::Ffmpeg],
             Pack::Magick => &[Tool::Magick],
@@ -640,7 +640,7 @@ fn trim(pack: Pack, dir: &Path) {
         }
         Pack::Poppler => {
             let bin = if dir.join("bin").is_dir() { dir.join("bin") } else { dir.to_path_buf() };
-            keep_programs(&bin, &["pdftoppm.exe", "pdftotext.exe", "pdfseparate.exe", "pdfunite.exe"]);
+            keep_programs(&bin, &["pdftoppm.exe", "pdftotext.exe", "pdfseparate.exe", "pdfunite.exe", "pdfimages.exe"]);
             if bin != dir {
                 keep_only(dir, &["bin", "share", MARKER]);
                 keep_only(&dir.join("share"), &["poppler"]);

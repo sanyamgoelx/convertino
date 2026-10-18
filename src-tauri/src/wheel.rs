@@ -147,6 +147,22 @@ pub struct Slot {
     /// Folder slots: where the result goes ("→ new folder Clips (compressed)").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub out: Option<String>,
+    /// The smart slot (smart.rs): first, tinted, Enter picks it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub smart: bool,
+    /// Smart slot: the hint's further lines.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+    /// Smart slot: what stops it ("Part 2 is missing").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warn: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub blocked: bool,
+    /// Smart slot: its Shift+click options, and the options card's button.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<crate::smart::Field>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub go: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -187,6 +203,9 @@ pub struct WheelModel {
     /// Compressed copies and their originals among what was clicked (the Compare slot).
     #[serde(skip)]
     pub compare: Vec<crate::pairs::Pair>,
+    /// What the smart slot works on.
+    #[serde(skip)]
+    pub smart_files: Vec<String>,
 }
 
 /// What the folder wheel shows about the folder.
@@ -339,6 +358,9 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
+        // A file whose name says something other than what it is: the wheel
+        // offers what fits what it is (and the smart slot fixes the name).
+        let ext = if paths.len() <= 50 { crate::sniff::wrong_ext(path).filter(|r| family_of(r).is_some()).map(str::to_string).unwrap_or(ext) } else { ext };
         match reg.families.iter().find(|f| f.extensions.iter().any(|e| *e == ext)) {
             Some(fam) => files.push(FileInfo {
                 path: p.clone(),
@@ -351,7 +373,14 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         }
     }
 
+    // What the files are can call for a smart slot (smart.rs); it works on
+    // files Convertino otherwise can't convert too (archive parts, LUTs).
+    let picked_all: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).filter(|p| p.is_file()).collect();
+    let offer = if paths.len() <= 50 { crate::smart::offer(&picked_all) } else { None };
     if files.is_empty() {
+        if let Some(o) = &offer {
+            return Ok(smart_only(o, paths, accent, prefs));
+        }
         let folders = paths.iter().filter(|p| Path::new(p).is_dir()).count();
         return Err(if paths.is_empty() {
             "Nothing is selected. Select one or more files first.".into()
@@ -430,6 +459,15 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
     };
 
     let mut main = main;
+    let mut more = more;
+    if let Some(o) = &offer {
+        if fam_ids.len() == 1 {
+            place_smart(&mut main, &mut more, smart_slot(o), o.replaces, fam_ids[0], files.len());
+        } else {
+            main.insert(0, smart_slot(o));
+        }
+    }
+    let smart_files: Vec<String> = offer.as_ref().map(|o| o.files.iter().map(|p| p.to_string_lossy().into_owned()).collect()).unwrap_or_default();
     let picked: Vec<std::path::PathBuf> = files.iter().map(|f| std::path::PathBuf::from(&f.path)).collect();
     let compare = crate::pairs::for_files(&picked);
     if let Some(s) = compare_slot_files(&compare, &picked) {
@@ -437,7 +475,7 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
     }
 
     let first = fam(fam_ids[0]);
-    let (hub_title, hub_subtitle) = if files.len() == 1 {
+    let (hub_title, mut hub_subtitle) = if files.len() == 1 {
         // A RAW photo shows its megapixels ("RAW photo · 24 MP"), which says more than its size.
         let sub = (first.id == "raw").then(|| crate::raw::describe(Path::new(&files[0].path))).flatten();
         (files[0].name.clone(), sub.unwrap_or_else(|| format!("{} · {}", first.label, human_size(files[0].size))))
@@ -446,6 +484,12 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
     } else {
         (format!("{} files", files.len()), format!("{} types", fam_ids.len()))
     };
+
+    if files.len() == 1 {
+        if let Some(h) = offer.as_ref().and_then(|o| o.hub.clone()) {
+            hub_subtitle = h;
+        }
+    }
 
     Ok(WheelModel {
         os: if cfg!(target_os = "macos") { "mac" } else { "win" },
@@ -468,10 +512,118 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         folder: None,
         scan: None,
         compare,
+        smart_files,
     })
 }
 
-/// The wheel for a folder (or several), from its scan.
+/// A wheel with only the smart slot: files Convertino can't convert, but
+/// knows what to do with (an archive's parts, LUTs, After Effects scripts).
+fn smart_only(o: &crate::smart::Offer, paths: &[String], accent: Option<String>, prefs: &Settings) -> WheelModel {
+    let files: Vec<FileInfo> = o
+        .files
+        .iter()
+        .map(|p| FileInfo {
+            path: p.to_string_lossy().into_owned(),
+            name: file_name_of(p),
+            ext: p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default(),
+            family: "smart".into(),
+            size: std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
+        })
+        .collect();
+    let skipped: Vec<String> = paths.iter().map(Path::new).filter(|p| !o.files.iter().any(|f| f == p)).map(file_name_of).collect();
+    let (hub_title, hub_subtitle) = match files.as_slice() {
+        [one] => (one.name.clone(), o.hub.clone().unwrap_or_else(|| human_size(one.size))),
+        many => (format!("{} files", many.len()), o.hub.clone().unwrap_or_else(|| o.label.clone())),
+    };
+    WheelModel {
+        os: if cfg!(target_os = "macos") { "mac" } else { "win" },
+        accent,
+        hub_family: "smart".into(),
+        hub_color: "#6B6F7A".into(),
+        smart_files: o.files.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+        files,
+        skipped,
+        hub_title,
+        hub_subtitle,
+        main: vec![smart_slot(o)],
+        more: Vec::new(),
+        ring: prefs.progress_ring,
+        handoff_ms: prefs.handoff_seconds as u64 * 1000,
+        quality: prefs.quality.clone(),
+        presets: crate::tune::resolved_json(&prefs.quality.tune),
+        pending_dialog: None,
+        ask: None,
+        selected: paths.to_vec(),
+        folder: None,
+        scan: None,
+        compare: Vec::new(),
+    }
+}
+
+/// The smart slot for what was picked.
+fn smart_slot(o: &crate::smart::Offer) -> Slot {
+    Slot {
+        id: o.id.clone(),
+        label: o.label.clone(),
+        icon: o.icon.clone(),
+        hint: o.hint.clone(),
+        family: "smart".into(),
+        tag: None,
+        kind: SlotKind::Target,
+        count: o.files.len(),
+        sub: Some(o.sub.clone()).filter(|s| !s.is_empty()),
+        smart: true,
+        lines: o.lines.clone(),
+        warn: o.warn.clone(),
+        blocked: o.blocked,
+        fields: o.fields.clone(),
+        go: Some(o.go.clone()),
+        ..Slot::default()
+    }
+}
+
+fn more_slot(more: &[Slot], family: &str, count: usize) -> Slot {
+    Slot {
+        id: "more".into(),
+        label: "More".into(),
+        icon: "more".into(),
+        hint: format!("More: {}", more.iter().filter(|s| s.kind == SlotKind::Target).map(|s| s.label.as_str()).collect::<Vec<_>>().join(", ")),
+        family: family.into(),
+        tag: None,
+        kind: SlotKind::More,
+        count,
+        ..Slot::default()
+    }
+}
+
+/// Puts the smart slot first. The slot it replaces goes; when the ring is
+/// then over-full, its last format moves behind More (made if needed).
+fn place_smart(main: &mut Vec<Slot>, more: &mut Vec<Slot>, smart: Slot, replaces: Option<&str>, family: &str, count: usize) {
+    if let Some(r) = replaces {
+        main.retain(|s| s.id != r);
+        more.retain(|s| s.id != r);
+        if more.iter().all(|s| s.kind != SlotKind::Target) {
+            more.clear();
+            main.retain(|s| s.kind != SlotKind::More);
+        }
+    }
+    main.insert(0, smart);
+    if main.len() <= MAX_SLOTS {
+        return;
+    }
+    let has_more = main.last().is_some_and(|s| s.kind == SlotKind::More);
+    let at = if has_more { main.len() - 2 } else { main.len() - 1 };
+    let moved = main.remove(at);
+    if has_more {
+        more.insert(0, moved);
+        let n = main.len() - 1;
+        main[n] = more_slot(more, family, count);
+    } else {
+        more.push(moved);
+        more.push(Slot { id: "back".into(), label: "Back".into(), icon: "back".into(), hint: "Back to the main ring".into(), family: family.into(), kind: SlotKind::Back, count, ..Slot::default() });
+        main.push(more_slot(more, family, count));
+    }
+}
 pub fn build_folder(scan: std::sync::Arc<crate::folder::Scan>, accent: Option<String>, blank: bool) -> Result<WheelModel, String> {
     build_folder_with(scan, accent, blank, &crate::settings::get())
 }
@@ -553,6 +705,7 @@ fn build_folder_with(scan: std::sync::Arc<crate::folder::Scan>, accent: Option<S
         folder: Some(view),
         scan: Some(scan),
         compare,
+        smart_files: Vec::new(),
     })
 }
 
@@ -584,6 +737,7 @@ pub fn scanning_folder(roots: &[std::path::PathBuf], found: usize, accent: Optio
         folder: Some(FolderView { name, roots: roots.iter().map(|r| r.to_string_lossy().into_owned()).collect(), blank, scanning: Some(found), defaults: prefs.folder, ..FolderView::default() }),
         scan: None,
         compare: Vec::new(),
+        smart_files: Vec::new(),
     }
 }
 
@@ -836,6 +990,64 @@ mod tests {
         let p = std::env::temp_dir().join(name);
         std::fs::write(&p, b"x").unwrap();
         p.to_string_lossy().into_owned()
+    }
+
+    fn zip_at(path: &std::path::Path, files: &[(&str, &[u8])]) {
+        let f = std::fs::File::create(path).unwrap();
+        let mut z = zip::ZipWriter::new(f);
+        for (n, data) in files {
+            z.start_file(*n, zip::write::SimpleFileOptions::default()).unwrap();
+            std::io::Write::write_all(&mut z, data).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    #[test]
+    fn smart_slot_comes_first_and_says_what_it_does() {
+        let _lock = crate::fonts::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let d = std::env::temp_dir().join(format!("convertino-wheel-smart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::env::set_var("CONVERTINO_FONTS_DIR", d.join("installed"));
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        let font = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/vendor/fonts/NotoSans-Regular.ttf")).unwrap();
+
+        // A zip of fonts: Install fonts first, the archive slots after it.
+        let fonts = d.join("Noto.zip");
+        zip_at(&fonts, &[("Noto/NotoSans-Regular.ttf", &font), ("Noto/OFL.txt", b"licence")]);
+        let m = build(&[s(&fonts)], None).unwrap();
+        assert!(m.main[0].smart);
+        assert_eq!((m.main[0].id.as_str(), m.main[0].sub.as_deref(), m.main[0].family.as_str()), ("smart.fonts", Some("1 font"), "smart"));
+        assert_eq!(m.main[0].go.as_deref(), Some("Install 1 font"));
+        assert!(m.main.iter().any(|x| x.id == "archive.extract"));
+        assert_eq!(m.hub_subtitle, "1 font inside");
+        assert_eq!(m.smart_files, vec![s(&fonts)]);
+
+        // One folder inside: Extract itself, first, with what it'll do.
+        let kit = d.join("Brand Kit.zip");
+        zip_at(&kit, &[("Brand Kit/a.txt", b"a"), ("Brand Kit/b.txt", b"b")]);
+        let m = build(&[s(&kit)], None).unwrap();
+        assert_eq!((m.main[0].id.as_str(), m.main[0].smart), ("archive.extract", true));
+        assert_eq!(m.main.iter().filter(|x| x.id == "archive.extract").count(), 1);
+
+        // A WEBP named .jpg: Fix name first, and the ring is a WEBP's (JPG offered, not WEBP).
+        let webp = d.join("hero-banner.jpg");
+        std::fs::write(&webp, b"RIFF\x10\x00\x00\x00WEBPVP8 data").unwrap();
+        let m = build(&[s(&webp)], None).unwrap();
+        assert_eq!(m.main[0].id, "smart.fix-name");
+        let all: Vec<&str> = m.main.iter().chain(m.more.iter()).map(|x| x.id.as_str()).collect();
+        assert!(all.contains(&"image.jpg") && !all.contains(&"image.webp"), "{all:?}");
+        assert!(m.main.len() <= MAX_SLOTS, "the ring stays at {MAX_SLOTS}: {}", m.main.len());
+        assert_eq!(m.files[0].ext, "webp");
+
+        // Parts of an archive: a file Convertino can't convert, but the wheel opens with Join.
+        for n in 1..=3 {
+            std::fs::write(d.join(format!("Footage.zip.{n:03}")), b"x").unwrap();
+        }
+        let m = build(&[s(&d.join("Footage.zip.002"))], None).unwrap();
+        assert_eq!(m.main.len(), 1);
+        assert_eq!((m.main[0].id.as_str(), m.hub_subtitle.as_str()), ("smart.join", "Part 2 · 3 found"));
+        std::env::remove_var("CONVERTINO_FONTS_DIR");
     }
 
     #[test]

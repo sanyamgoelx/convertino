@@ -136,6 +136,8 @@ pub struct Settings {
     pub folder: crate::folder::Defaults,
     /// Watched folders: new files in them are converted (see watch.rs).
     pub watched: Vec<crate::watch::Watched>,
+    /// Smart actions' Shift+click choices kept with "Use these every time" (action id -> options).
+    pub smart: BTreeMap<String, serde_json::Value>,
     /// Settings format. Files without it are from before version 2.
     #[serde(default)]
     pub version: u32,
@@ -166,6 +168,7 @@ impl Default for Settings {
             ask_mode: "chat".into(),
             folder: crate::folder::Defaults::default(),
             watched: Vec::new(),
+            smart: BTreeMap::new(),
             version: VERSION,
         }
     }

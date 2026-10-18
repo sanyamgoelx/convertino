@@ -331,11 +331,13 @@ fn list_conversions(args: &Value) -> ToolResult {
     let mut text = String::new();
     for f in &list {
         let name = engine::file_name(&f.path);
+        // Installing (fonts, LUTs, After Effects) changes the computer: only the person starts that.
+        let smart = f.smart.as_ref().filter(|s| !s.installs).map(|s| format!(" · {} ({}: {})", s.name, s.label, s.hint)).unwrap_or_default();
         match &f.family {
-            None => text.push_str(&format!("{name}: Convertino can't convert this kind of file.\n")),
-            Some(fam) => {
+            None if smart.is_empty() => text.push_str(&format!("{name}: Convertino can't convert this kind of file.\n")),
+            fam => {
                 let names: Vec<String> = f.conversions.iter().map(|c| if c.multi { format!("{} (2+ files)", c.name) } else { c.name.clone() }).collect();
-                text.push_str(&format!("{name} ({}, {}): {}\n", fam.to_lowercase(), engine::human_size(f.bytes), names.join(", ")));
+                text.push_str(&format!("{name} ({}, {}): {}{smart}\n", fam.as_deref().unwrap_or("other").to_lowercase(), engine::human_size(f.bytes), names.join(", ")));
             }
         }
     }
@@ -440,6 +442,9 @@ fn convert_tool(args: &Value, ctx: &Ctx, size: Option<size::Ask>) -> ToolResult 
         Ok(q) => q,
         Err(e) => return ToolResult::fail(e),
     };
+    if crate::smart::from_word(&to).is_some_and(crate::smart::installs) {
+        return ToolResult::fail("Installing fonts, LUTs or After Effects presets changes the computer, so only the person can start it (Alt+right-click the file, or the command line).");
+    }
     let (groups, skipped) = cli::group(&files, &to);
     if groups.is_empty() {
         let why: Vec<String> = skipped.iter().map(|(p, e)| format!("{}: {e}", engine::file_name(p))).collect();

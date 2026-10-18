@@ -454,6 +454,13 @@
           "icon": "frames",
           "action": true,
           "hint": "One PNG per second"
+        },
+        {
+          "id": "video.mute",
+          "label": "No sound",
+          "icon": "mute",
+          "action": true,
+          "hint": "The same video without its sound · instant, nothing re-encoded"
         }
       ],
       "more": [
@@ -693,6 +700,55 @@
           "icon": "archive",
           "ext": "tgz",
           "hint": "For Linux and servers"
+        }
+      ]
+    },
+    {
+      "id": "font",
+      "label": "Font",
+      "color": "#37474F",
+      "extensions": [
+        "ttf",
+        "otf",
+        "ttc",
+        "woff",
+        "woff2"
+      ],
+      "targets": [
+        {
+          "id": "font.woff2",
+          "label": "WOFF2",
+          "icon": "font",
+          "ext": "woff2",
+          "hint": "Web font for Shopify themes and websites · the smallest",
+          "sources": [
+            "ttf",
+            "otf",
+            "woff"
+          ]
+        },
+        {
+          "id": "font.woff",
+          "label": "WOFF",
+          "icon": "font",
+          "ext": "woff",
+          "hint": "Web font that even old browsers read",
+          "sources": [
+            "ttf",
+            "otf",
+            "woff2"
+          ]
+        },
+        {
+          "id": "font.desktop",
+          "label": "Desktop font",
+          "icon": "font",
+          "action": true,
+          "hint": "The TTF or OTF inside this web font (whichever it holds)",
+          "sources": [
+            "woff",
+            "woff2"
+          ]
         }
       ]
     }

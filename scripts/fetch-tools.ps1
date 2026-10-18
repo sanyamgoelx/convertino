@@ -1,4 +1,7 @@
 # Gets every converter Convertino uses into src-tauri\tools, using the app's
+# Builds and tests run below normal priority (the programs they start inherit it),
+# so games and other apps stay smooth while they work.
+try { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' } catch {}
 # own downloader (src-tauri\src\install.rs): the same downloads, trimming and
 # checks a friend's PC goes through the first time it needs each converter.
 # Converters already there are trimmed instead of downloaded again.

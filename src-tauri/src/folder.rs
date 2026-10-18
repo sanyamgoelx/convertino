@@ -1046,6 +1046,7 @@ fn slot_of(action: &Action, p: &Picks, scan: &Scan, d: &Defaults) -> Slot {
         sub: Some(p.sub.clone()),
         detail: (!leaves.is_empty()).then_some(leaves),
         out: (!p.out.is_empty()).then(|| p.out.clone()),
+        ..Slot::default()
     }
 }
 

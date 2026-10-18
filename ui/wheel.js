@@ -35,6 +35,11 @@ const ICONS = {
   pin: '<path d="M12 21s-6-5.6-6-11a6 6 0 0112 0c0 5.4-6 11-6 11z"/><path d="M4 4l16 16"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   folder: '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
+  font: '<path d="M3.5 19L8.5 5l5 14M5.3 14h6.4"/><circle cx="17.5" cy="16.2" r="2.8"/><path d="M20.3 13v6"/>',
+  tag: '<path d="M3.5 12.5l8.5-8.5h8v8l-8.5 8.5z"/><circle cx="15.8" cy="8.2" r="1.5"/>',
+  mute: '<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
+  install: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  subtitles: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 11h10M7 15h4M13 15h4"/>',
   spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
 };
 const icon = (name, size = 20) =>
@@ -88,7 +93,8 @@ function draw() {
   const segs = slots
     .map((s, i) => {
       const c = -90 + i * step;
-      return `<path class="seg" data-i="${i}" d="${sector(c - step / 2 + gap, c + step / 2 - gap)}"/>` +
+      const cls = s.smart ? (s.blocked ? " smart blocked" : " smart") : "";
+      return `<path class="seg${cls}" data-i="${i}" d="${sector(c - step / 2 + gap, c + step / 2 - gap)}"/>` +
         `<path class="arc" data-i="${i}" d="${arc(R - 2.5, c - step / 2 + 3, c + step / 2 - 3)}"/>`;
     })
     .join("");
@@ -97,7 +103,7 @@ function draw() {
     .map((s, i) => {
       const a = ((-90 + i * step) * Math.PI) / 180;
       const x = (R + rm * Math.cos(a)).toFixed(1), y = (R + rm * Math.sin(a)).toFixed(1);
-      return `<div class="slot${s.icon ? "" : " sized"}" role="menuitem" data-i="${i}" style="left:${x}px;top:${y}px;transition-delay:${i * 14}ms">` +
+      return `<div class="slot${s.icon ? "" : " sized"}${s.smart ? " smart" : ""}${s.blocked ? " blocked" : ""}" role="menuitem"${s.blocked ? ' aria-disabled="true"' : ""} data-i="${i}" style="left:${x}px;top:${y}px;transition-delay:${i * 14}ms">` +
         (s.tag ? `<span class="tag">${esc(s.tag)}</span>` : "") +
         (s.icon ? icon(s.icon) : "") + `<span class="lbl">${esc(s.label)}</span>` +
         (s.sub ? `<span class="sub">${esc(s.sub)}</span>` : "") +
@@ -162,9 +168,11 @@ function setActive(i) {
   if (isFolder()) return folderHint(s);
   if (!s) {
     const skipped = model && model.skipped.length ? ` · ${model.skipped.length} item${model.skipped.length > 1 ? "s" : ""} skipped` : "";
-    hintEl.innerHTML = `<span class="hs">Point at a format${skipped}</span><span class="hk">1–${Math.min(9, slots.length)} to pick · arrows to move · Esc to cancel</span>`;
+    const smart = slots[0] && slots[0].smart && !slots[0].blocked ? ` · Enter: ${esc(slots[0].label)}` : "";
+    hintEl.innerHTML = `<span class="hs">Point at a format${skipped}</span><span class="hk">1–${Math.min(9, slots.length)} to pick${smart} · arrows to move · Esc to cancel</span>`;
     return;
   }
+  if (s.smart) return smartHint(s);
   if (s.kind === "compare") return compareHint(s);
   const files = s.kind === "target" && s.count > 1 ? ` · ${s.count} files` : "";
   const how = s.kind !== "target" ? "Click to open" : OPTIONS[s.id] ? "Click to convert · Shift+click for options" : "Click to convert";
@@ -172,6 +180,111 @@ function setActive(i) {
     `<span class="ht">${s.tag ? esc(s.tag) + " → " : ""}${esc(s.label)}</span>` +
     `<span class="hs">${esc(s.hint)}${files}</span>` +
     `<span class="hk">${how}</span>`;
+}
+
+// ---------- the smart slot ----------
+// What the file is decides it (smart.rs): install the fonts in a zip, join
+// an archive's parts, fix a wrong extension… It's first on the ring, tinted,
+// and Enter picks it. Its hint says everything it will do.
+
+function smartHint(s) {
+  const lines = (s.lines || []).map((l, i) => `<span class="${i === 0 ? "hs hl" : "hk"}">${esc(l)}</span>`).join("");
+  const warn = s.warn ? `<span class="hw">${esc(s.warn)}</span>` : "";
+  const how = s.blocked ? "Can't be done as it is" : (s.fields && s.fields.length ? "Click or Enter · Shift+click for options · Esc to cancel" : "Click or Enter · Esc to cancel");
+  hintEl.innerHTML = `<span class="ht">${esc(s.label)}</span><span class="hs">${esc(s.hint)}</span>` + lines + warn + `<span class="hk">${how}</span>`;
+}
+
+function startSmart(s, opts, remember) {
+  launch(s, { targetId: s.id, label: s.label, family: "smart", quality: null, remember: !!remember, size: null, smart: opts });
+}
+
+function fieldValues(fields) {
+  const v = {};
+  for (const f of fields || []) v[f.key] = f.value;
+  return v;
+}
+
+function showSmartOptions(s) {
+  optsFor = { smart: s, values: fieldValues(s.fields) };
+  document.getElementById("opts-title").textContent = s.label;
+  document.querySelector(".opts-sub").textContent = model.files.length === 1 ? model.files[0].name : `${model.files.length} files`;
+  optsKeep.nextElementSibling.textContent = "Use these every time";
+  optsKeep.checked = false;
+  renderSmartFields(s);
+  optsEl.hidden = false;
+  document.body.classList.add("with-opts");
+  hintEl.classList.remove("show");
+  const first = optsFields.querySelector("input:checked, select, input");
+  if (first) first.focus();
+}
+
+function renderSmartFields(s) {
+  const v = optsFor.values;
+  const html = (s.fields || []).map((f) => {
+    if (f.kind === "radio") {
+      return `<fieldset class="opts-modes"><legend>${esc(f.label)}</legend>` + f.choices.map((c) =>
+        `<label class="opts-mode"><input type="radio" name="s-${esc(f.key)}" data-s="${esc(f.key)}" value="${esc(c.value)}"${String(v[f.key]) === c.value ? " checked" : ""}>` +
+        `<span><b>${esc(c.label)}</b>${c.sub ? `<span>${esc(c.sub)}</span>` : ""}</span></label>`).join("") + `</fieldset>`;
+    }
+    if (f.kind === "select") {
+      return `<label class="opts-field"><span>${esc(f.label)}</span><select data-s="${esc(f.key)}">` +
+        f.choices.map((c) => `<option value="${esc(c.value)}"${String(v[f.key]) === c.value ? " selected" : ""}>${esc(c.label)}</option>`).join("") + `</select></label>`;
+    }
+    if (f.kind === "check") {
+      return `<label class="opts-check"><input type="checkbox" data-s="${esc(f.key)}"${v[f.key] ? " checked" : ""}><span>${esc(f.label)}${f.sub ? `<small>${esc(f.sub)}</small>` : ""}</span></label>`;
+    }
+    // A folder: "folder" with a checkbox, "path" without one; Change… picks it.
+    const path = v[f.key];
+    const shown = path ? `<small class="opts-path">${esc(path)}</small>` : `<small>No folder chosen yet</small>`;
+    const box = f.kind === "folder" ? `<input type="checkbox" data-s="${esc(f.key)}" data-folder="1"${path ? " checked" : ""}>` : "";
+    return `<div class="opts-check opts-folder">${box}<span>${esc(f.label)}${shown}</span><button type="button" class="opts-change" data-pick="${esc(f.key)}">Change…</button></div>`;
+  }).join("");
+  optsFields.innerHTML = html + `<p class="opts-note" id="smart-lines"></p>`;
+  smartPreviewShow(s);
+}
+
+/// The button and the lines under the options, as Rust works them out for these choices.
+function smartPreviewShow(o) {
+  document.getElementById("opts-go").textContent = o.go || o.label;
+  document.getElementById("opts-go").disabled = !!o.blocked || /^Nothing to /.test(o.go || "");
+  const lines = [o.hint].concat(o.lines || []).filter(Boolean);
+  const el = document.getElementById("smart-lines");
+  if (el) el.textContent = lines.join(" · ");
+}
+
+let smartPreviewN = 0;
+function smartPreview() {
+  if (!optsFor || !optsFor.smart || !tauri) return;
+  const n = ++smartPreviewN;
+  tauri.core.invoke("smart_preview", { targetId: optsFor.smart.id, opts: optsFor.values }).then((o) => {
+    if (n !== smartPreviewN || !optsFor || !optsFor.smart || !o) return;
+    smartPreviewShow(o);
+  }).catch((e) => console.error(e));
+}
+
+function smartOptionInput(e) {
+  const t = e.target;
+  const k = t.dataset.s;
+  if (!k) return;
+  if (t.dataset.folder) {
+    if (!t.checked) { optsFor.values[k] = null; renderSmartFields(optsFor.smart); return smartPreview(); }
+    if (!optsFor.values[k]) return pickSmartFolder(k, t);
+    return;
+  }
+  optsFor.values[k] = t.type === "checkbox" ? t.checked : t.value;
+  smartPreview();
+}
+
+function pickSmartFolder(k, box) {
+  if (!tauri) return;
+  const f = (optsFor.smart.fields || []).find((x) => x.key === k);
+  tauri.core.invoke("smart_pick_folder", { title: f ? f.label : "Choose a folder" }).then((p) => {
+    if (!optsFor || !optsFor.smart) return;
+    if (p) optsFor.values[k] = p;
+    else if (box) box.checked = !!optsFor.values[k];
+    renderSmartFields(optsFor.smart);
+    smartPreview();
+  }).catch((e) => console.error(e));
 }
 
 // ---------- Compare ----------
@@ -407,6 +520,11 @@ function choose(i, withOptions = false) {
   if (s.kind === "back") return showPage("main");
   if (s.kind === "size") return startSize(s.bytes, s.label, null);
   if (s.kind === "custom") return openCustom("");
+  if (s.smart) {
+    if (s.blocked) return;
+    if (withOptions && s.fields && s.fields.length) return showSmartOptions(s);
+    return startSmart(s, null, false);
+  }
   if (s.kind === "compare") return animateOut(() => tauri && tauri.core.invoke("wheel_compare").catch((e) => console.error(e)));
   if (s.kind === "target" && COMPRESS.has(s.id)) return enterSize(s);
   if (isFolder()) {
@@ -577,6 +695,7 @@ function hideOptions() {
 
 if (optsEl) {
   optsFields.addEventListener("input", (e) => {
+    if (optsFor && optsFor.smart) return e.target.type === "checkbox" || e.target.type === "radio" ? null : smartOptionInput(e);
     if (optsFor && optsFor.folder) return folderOptionInput(e);
     if (optsFor && optsFor.ask && e.target.name === "askmode") { optsFor.mode = e.target.value; return; }
     const tkey = e.target.dataset.tune;
@@ -601,6 +720,7 @@ if (optsEl) {
     }
   });
   optsFields.addEventListener("change", (e) => {
+    if (optsFor && optsFor.smart) return e.target.tagName === "SELECT" ? null : smartOptionInput(e);
     if (optsFor && optsFor.folder) return folderOptionInput(e);
     if (e.target.type === "checkbox" && e.target.dataset.tune && optsFor) setQuickTune(e.target.dataset.tune, e.target.checked);
   });
@@ -618,6 +738,11 @@ if (optsEl) {
       hideOptions();
       return folderGo(slot, folder, kind === "compress" ? q : null, remember);
     }
+    if (optsFor.smart) {
+      const { smart, values } = optsFor;
+      hideOptions();
+      return startSmart(smart, values, remember);
+    }
     const { slot, q } = optsFor;
     hideOptions();
     start(slot, q, remember);
@@ -627,7 +752,11 @@ if (optsEl) {
     hideOptions();
     hintEl.classList.add("show");
   });
-  optsEl.addEventListener("click", (e) => e.stopPropagation());
+  optsEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const pick = e.target.closest && e.target.closest("[data-pick]");
+    if (pick && optsFor && optsFor.smart) pickSmartFolder(pick.dataset.pick, null);
+  });
   optsEl.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideOptions(); hintEl.classList.add("show"); }
   });
@@ -1009,7 +1138,7 @@ function ringDone(d) {
   ringProg.style.strokeDashoffset = 0;
   ringIn.innerHTML = TICK;
   // "holiday-goa.jpg · 2.8 MB" -> "Saved holiday-goa.jpg"
-  ringText.textContent = "Saved " + String(d.body).split(" · ")[0];
+  ringText.textContent = d.pill || "Saved " + String(d.body).split(" · ")[0];
   ringUndo.hidden = !d.canUndo;
   // Where it went: "Show in Finder" / "Show in folder" (just "Show" next to Compare) opens it with the file selected.
   ringShow.hidden = !d.canUndo;
@@ -1156,6 +1285,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); return setActive((active + 1 + n) % n); }
   if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); return setActive(active <= 0 ? n - 1 : active - 1); }
   if (e.key === "Enter" && active >= 0) { e.preventDefault(); return choose(active, e.shiftKey); }
+  // Nothing pointed at: Enter picks the smart slot.
+  if (e.key === "Enter" && slots[0] && slots[0].smart && !slots[0].blocked) { e.preventDefault(); setActive(0); return choose(0, e.shiftKey); }
   if (e.key === "Backspace" && page === "more") { e.preventDefault(); return showPage("main"); }
   if (e.code === "KeyC" && !e.ctrlKey && !e.metaKey && !e.altKey && showAsk()) { e.preventDefault(); return ask(e.shiftKey); }
   // Shift+1 types "!" on most keyboards: read the key's position instead.
@@ -1216,6 +1347,10 @@ if (tauri) {
   const t = (id, label, icon, hint) => ({ id, label, icon, hint, family: "pdf", tag: null, kind: "target", count: 1 });
   // ?folder: a sample folder wheel.
   const fs = (id, label, icon, count, sub, hint, detail, out) => ({ id, label, icon, hint, family: "folder", tag: null, kind: "target", count, sub, detail, out });
+  // ?smart: a zip of fonts (a model Rust built), with the smart slot first.
+  if (/smart/.test(location.search)) {
+    open(Object.assign({"os":"win","accent":null,"files":[{"path":"C:\\Users\\Crofty\\Downloads\\Noto Sans Family.zip","name":"Noto Sans Family.zip","ext":"zip","family":"archive","size":835000}],"skipped":[],"hubTitle":"Noto Sans Family.zip","hubSubtitle":"3 fonts inside","hubFamily":"archive","hubColor":"#9A6B00","main":[{"id":"smart.fonts","label":"Install font","icon":"font","hint":"1 Noto Sans font (TTF), just for you, no admin prompt","family":"smart","tag":null,"kind":"target","count":1,"sub":"1 font","smart":true,"lines":["Straight into Windows' Fonts folder: nothing gets unzipped next to the zip","Left out: 1 duplicate · 1 web font"],"fields":[{"key":"for","kind":"radio","label":"Install for","choices":[{"value":"me","label":"Just me","sub":"No admin prompt. Most apps see these."},{"value":"all","label":"Everyone on this PC","sub":"One admin prompt. For older apps that only see fonts installed for everyone."}],"value":"me"},{"key":"keep","kind":"folder","label":"Also keep the font files in","choices":[],"value":null}],"go":"Install 1 font"},{"id":"archive.extract","label":"Extract","icon":"extract","hint":"Unpack into a folder next to the archive","family":"archive","tag":null,"kind":"target","count":1},{"id":"archive.7z","label":"7Z","icon":"archive","hint":"7-Zip · about 20% smaller","family":"archive","tag":null,"kind":"target","count":1},{"id":"archive.targz","label":"TAR.GZ","icon":"archive","hint":"For Linux and servers","family":"archive","tag":null,"kind":"target","count":1}],"more":[],"ring":true,"handoffMs":2000,"ask":null}, { quality: DEFAULT_Q, presets: {} }));
+  } else
   if (/folder/.test(location.search)) {
     open({
       os: /Mac/.test(navigator.platform) ? "mac" : "win", accent: null, files: [], skipped: ["Valorant clips"],

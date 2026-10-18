@@ -1,6 +1,6 @@
 [package]
 name = "convertino"
-version = "0.2.10"
+version = "0.2.11"
 description = "Convert any file from a radial wheel in Explorer or Finder"
 authors = ["Crofty"]
 license = "GPL-3.0-or-later"
@@ -42,10 +42,18 @@ oxipng = { version = "10", default-features = false, features = ["parallel"] }
 tauri-plugin-updater = "2"
 # Free space before a folder job writes gigabytes.
 fs4 = "1"
+# Smart actions: look inside zips (and Office files) without unpacking them.
+zip = { version = "4", default-features = false, features = ["deflate", "deflate64"] }
+# Fonts: names (already installed?), and web fonts in and out (WOFF, WOFF2).
+ttf-parser = "0.25"
+wuff = { version = "0.2", features = ["z", "brotli"] }
+brotli = "8"
+flate2 = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_Graphics_Gdi",
   "Win32_System_Com",
   "Win32_System_Console",
   "Win32_System_Ole",
@@ -58,6 +66,15 @@ windows = { version = "0.61", features = [
   "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Dev runs and tests: the libraries are built optimised once (and then come from
+# the cache), so pictures, PDFs and zips are read at release speed; only
+# Convertino's own code is rebuilt on each change. Line numbers only, so linking
+# stays quick.
+[profile.dev]
+debug = "line-tables-only"
+[profile.dev.package."*"]
+opt-level = 2
 
 # The picture comparison is slow unoptimised; tests and dev builds use it too.
 [profile.dev.package.ssimulacra2]

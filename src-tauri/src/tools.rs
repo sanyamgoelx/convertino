@@ -16,6 +16,7 @@ pub enum Tool {
     Pdftotext,
     Pdfseparate,
     Pdfunite,
+    Pdfimages,
     Ghostscript,
     LibreOffice,
     Pandoc,
@@ -27,7 +28,7 @@ impl Tool {
         match self {
             Tool::Ffmpeg => "FFmpeg",
             Tool::Magick => "ImageMagick",
-            Tool::Pdftoppm | Tool::Pdftotext | Tool::Pdfseparate | Tool::Pdfunite => "Poppler",
+            Tool::Pdftoppm | Tool::Pdftotext | Tool::Pdfseparate | Tool::Pdfunite | Tool::Pdfimages => "Poppler",
             Tool::Ghostscript => "Ghostscript",
             Tool::LibreOffice => "LibreOffice",
             Tool::Pandoc => "Pandoc",
@@ -48,6 +49,7 @@ impl Tool {
             Tool::Pdftotext => (&["poppler/bin/pdftotext", "poppler/pdftotext"], &["pdftotext"]),
             Tool::Pdfseparate => (&["poppler/bin/pdfseparate", "poppler/pdfseparate"], &["pdfseparate"]),
             Tool::Pdfunite => (&["poppler/bin/pdfunite", "poppler/pdfunite"], &["pdfunite"]),
+            Tool::Pdfimages => (&["poppler/bin/pdfimages", "poppler/pdfimages"], &["pdfimages"]),
             Tool::Ghostscript => (&["ghostscript/bin/gswin64c", "ghostscript/bin/gs"], &["gswin64c", "gs"]),
             // soffice.com waits for the conversion to finish; soffice.exe may not.
             Tool::LibreOffice => (

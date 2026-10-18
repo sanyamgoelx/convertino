@@ -9,7 +9,7 @@
 #
 # Layout (tools.rs finds them; a .bundled file makes tools.rs set the data paths):
 #   imagemagick/magick, dcraw_emu (LibRaw), lib/, modules/{coders,filters}/, etc/
-#   poppler/bin/{pdftoppm,pdftotext,pdfseparate,pdfunite}, lib/, share/poppler/
+#   poppler/bin/{pdftoppm,pdftotext,pdfseparate,pdfunite,pdfimages}, lib/, share/poppler/
 #   ghostscript/bin/gs, lib/, share/ghostscript/
 # Each also gets etc/fonts/fonts.conf (the Mac's own font folders).
 set -euo pipefail
@@ -93,7 +93,7 @@ touch "$IM/.bundled"
 PO="$OUT/poppler"
 POP="$(brew --prefix poppler)"
 progs=()
-for p in pdftoppm pdftotext pdfseparate pdfunite; do copy "$POP/bin/$p" "$PO/bin"; progs+=("$PO/bin/$p"); done
+for p in pdftoppm pdftotext pdfseparate pdfunite pdfimages; do copy "$POP/bin/$p" "$PO/bin"; progs+=("$PO/bin/$p"); done
 relocate "$PO/lib" @executable_path/../lib "${progs[@]}"
 if [ -d "$BREW/share/poppler/" ]; then mkdir -p "$PO/share/poppler"; cp -RL "$BREW/share/poppler/." "$PO/share/poppler/"; fi
 fonts_conf "$PO"

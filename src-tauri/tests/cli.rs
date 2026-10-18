@@ -282,6 +282,28 @@ fn formats_lists_what_a_file_can_become() {
 }
 
 #[test]
+fn smart_actions_from_the_command_line() {
+    let s = Sandbox::new("smart");
+    // A PNG saved as .jpg: `formats` names the smart action, --to fix-name renames it.
+    s.file("gradient.png", "photo.jpg");
+    let (code, v) = s.json(&["formats", "photo.jpg"]);
+    assert_eq!(code, 0);
+    assert_eq!(v[0]["smart"]["name"], "fix-name");
+    assert_eq!(v[0]["smart"]["hint"], "photo.jpg is really a PNG picture");
+    let (code, v) = s.json(&["photo.jpg", "--to", "fix-name"]);
+    assert_eq!(code, 0, "{v}");
+    assert!(v["outputs"][0]["path"].as_str().unwrap().ends_with("photo.png"), "{v}");
+    assert!(s.dir.join("photo.png").exists() && !s.dir.join("photo.jpg").exists());
+    // A CSV Excel reads fine: nothing to do, said plainly.
+    s.file("people.csv", "people.csv");
+    let out = s.run(&["people.csv", "--to", "excel"]);
+    let said = format!("{}{}", text(&out.stdout), text(&out.stderr));
+    if out.status.code() != Some(0) {
+        assert!(said.contains("Excel already reads this CSV correctly"), "{said}");
+    }
+}
+
+#[test]
 fn tools_status_is_json() {
     let s = Sandbox::new("tools");
     let (code, v) = s.json(&["tools"]);

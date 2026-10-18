@@ -16,6 +16,7 @@ src-tauri/installer/dmg-background.tiff
 docs/STATUS.md
 docs/BUILD-PLAN.md
 docs/PLAN-RAW-CLI-MCP.md
+docs/PLAN-SMART-ACTIONS.md
 docs/*mockup*.html
 more/stats-dump.cmd
 scripts/stats-dump.ps1

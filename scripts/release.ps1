@@ -21,6 +21,7 @@ if (git tag --list $tag) {
 
 # Only a commit whose Build run passed on all three machines (tests, installers,
 # installing them) gets released. Waits for the run the push above started.
+$started = Get-Date
 $sha = (git rev-parse HEAD).Trim()
 Say "Waiting for the Build checks of $($sha.Substring(0, 7)) (tests on Windows and Mac, installing the installers)..."
 $deadline = (Get-Date).AddMinutes(75)
@@ -33,8 +34,10 @@ while ($true) {
     exit 1
   }
   if ((Get-Date) -gt $deadline) { Say "Build checks didn't finish in 75 minutes; not releasing."; exit 1 }
-  Start-Sleep -Seconds 60
+  # Checked every 20 s: the tag goes out within moments of the checks passing.
+  Start-Sleep -Seconds 20
 }
+Say ("Build checks took {0:N0} min." -f ((Get-Date) - $started).TotalMinutes)
 if ($version -match "-") { Say "$tag is a test release (pre-release): installed copies won't update to it." }
 git tag -a $tag -m "Convertino $version" 2>&1 | ForEach-Object { Say "  $_" }
 git push origin $tag 2>&1 | ForEach-Object { Say "  $_" }

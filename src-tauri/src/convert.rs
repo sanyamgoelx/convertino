@@ -77,6 +77,12 @@ pub enum Op {
     /// Compress to a size (None: the smallest that still looks the same).
     /// `quality`: the presets (as tuned) for the "looks the same" part.
     ToSize { kind: size::Kind, bytes: Option<u64>, trim: Option<f64>, quality: Box<Quality> },
+    /// The video without its sound tracks (nothing re-encoded).
+    Mute,
+    /// A font file to a web font, or a web font back to a desktop font.
+    Font { to: crate::fonts::To },
+    /// A smart action (smart.rs): install fonts, join parts, fix a name…
+    Smart(Box<crate::smart::SmartOp>),
 }
 
 impl Op {
@@ -347,6 +353,14 @@ fn plan_plain(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<Ste
         "video.compress" => each("mp4", Some("compressed"), None, Op::Video { job: video::Job::Compress, opts }),
         "video.720p" => each("mp4", Some("720p"), None, Op::Video { job: video::Job::To720p, opts }),
         "video.frames" => each("png", None, Some("frames"), Op::Video { job: video::Job::Frames, opts }),
+        // The same container: every stream copied except the sound.
+        "video.mute" => files
+            .iter()
+            .map(|f| {
+                let (dir, stem, ext) = split(f);
+                Step { inputs: vec![f.clone()], dir, stem: format!("{stem} (no sound)"), ext, folder: false, op: Op::Mute }
+            })
+            .collect(),
 
         // ---------- data ----------
         t if t.starts_with("data.") => {
@@ -400,6 +414,24 @@ fn plan_plain(target_id: &str, files: &[PathBuf], q: &Quality) -> Result<Vec<Ste
             }
             steps
         }
+
+        // ---------- fonts ----------
+        "font.woff2" | "font.woff" | "font.desktop" => {
+            let to = match target_id {
+                "font.woff2" => crate::fonts::To::Woff2,
+                "font.woff" => crate::fonts::To::Woff,
+                _ => crate::fonts::To::Desktop,
+            };
+            files
+                .iter()
+                .map(|f| {
+                    let (dir, stem, _) = split(f);
+                    Step { inputs: vec![f.clone()], dir, stem, ext: crate::fonts::out_ext(f, to), folder: false, op: Op::Font { to } }
+                })
+                .collect()
+        }
+
+        t if crate::smart::is_smart(t) => return crate::smart::plan(t, files, None),
 
         _ => return Err(not_yet(target_id)),
     };
@@ -790,12 +822,23 @@ pub fn run(step: &Step, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String
     let mut step = step.clone();
     step.dir = output_dir(&step.dir);
     let step = &step;
-    let name = Reserved::new(&step.dir, &step.stem, if step.folder { "" } else { &step.ext });
+    // Smart actions that write into a fonts folder, an app's folder or the
+    // file's own name do that themselves (Convertino, not a converter), so
+    // nothing is reserved in the folder (the archive's own extraction names it).
+    let writes_itself = matches!(&step.op, Op::Smart(op) if op.writes_itself());
+    // Extract names what it makes from what's inside the archive (Reserved
+    // there): reserving the archive's name here too made "Brand Kit (1)".
+    let names_itself = writes_itself || matches!(step.op, Op::Extract);
+    let name = if names_itself {
+        Reserved::new(&std::env::temp_dir(), &format!("convertino-smart-{}", procs::current_job()), "")
+    } else {
+        Reserved::new(&step.dir, &step.stem, if step.folder { "" } else { &step.ext })
+    };
     let reserved = name.0.clone();
     // With Windows' ransomware protection on, only Convertino itself may be
     // allowed into Documents, Videos and so on, not each converter: the
     // converter writes into a scratch folder and Convertino moves the result.
-    let staging = if ransomware_protection_on_cached() { Some(TempDir::new("out")?) } else { None };
+    let staging = if ransomware_protection_on_cached() && !writes_itself { Some(TempDir::new("out")?) } else { None };
     let output = match &staging {
         Some(t) => t.0.join(reserved.file_name().unwrap_or_default()),
         None => reserved.clone(),
@@ -985,6 +1028,18 @@ fn run_op(step: &Step, output: &Path, progress: &mut dyn FnMut(f64)) -> Result<P
             Ok(output.to_path_buf())
         }
         Op::Extract => archive::extract(input, &step.dir, progress),
+        Op::Smart(op) => crate::smart::run(op, step, output, progress),
+        Op::Mute => {
+            if crate::sniff::tracks(input).is_some_and(|t| t.audio.is_empty()) {
+                return Err("This video has no sound to remove.".into());
+            }
+            run_ffmpeg(input, &s(&["-map", "0", "-map", "-0:a", "-c", "copy"]), output, progress)?;
+            Ok(output.to_path_buf())
+        }
+        Op::Font { to } => {
+            crate::fonts::convert(input, *to, output)?;
+            Ok(output.to_path_buf())
+        }
         Op::Repack { to } => {
             archive::repack(input, *to, output, progress)?;
             Ok(output.to_path_buf())

@@ -48,6 +48,9 @@ Usage:
   convertino <files…> --size <size>      compress to a size (25MB, 800KB, 1.5GB)
   convertino formats <files…>            what the files can become
   convertino <folder> --to <action>      everything in a folder: compress, zip, join, …
+  convertino <files…> --to <smart>       what the file is decides (as the wheel's first slot):
+                                         fonts, extract-all, join, fix-name, media, images,
+                                         excel, split-sound, subtitles, luts, ae
   convertino tools                       which converters are ready
   convertino tools install <name|--all>  download converters now
   convertino mcp                         run as an MCP server (AI apps start this)
@@ -481,6 +484,21 @@ pub struct Group {
 /// Which target each file goes to. Files whose family has no such target
 /// (or that Convertino can't read) are returned with the reason.
 pub fn group(files: &[PathBuf], to: &str) -> (Vec<Group>, Vec<(PathBuf, String)>) {
+    // Smart actions (--to fonts, join, fix-name…): what the files are decides
+    // whether they fit, as on the wheel.
+    if let Some(id) = crate::smart::from_word(to) {
+        return match crate::smart::offer_for(id, files, None) {
+            Some(o) if !o.blocked => {
+                let skipped = files.iter().filter(|f| !o.files.contains(f)).map(|f| (f.clone(), "This isn't a file.".to_string())).collect();
+                (vec![Group { target_id: id.into(), label: o.label.clone(), files: o.files.clone() }], skipped)
+            }
+            Some(o) => (Vec::new(), files.iter().map(|f| (f.clone(), o.warn.clone().unwrap_or_else(|| "This can't be done.".into()))).collect()),
+            None => {
+                let why = crate::smart::plan(id, files, None).err().unwrap_or_else(|| format!("--to {to} doesn't fit these files."));
+                (Vec::new(), files.iter().map(|f| (f.clone(), why.clone())).collect())
+            }
+        };
+    }
     let mut groups: Vec<Group> = Vec::new();
     let mut skipped = Vec::new();
     for f in files {
@@ -1052,6 +1070,19 @@ pub struct FileFormats {
     pub family: Option<String>,
     pub bytes: u64,
     pub conversions: Vec<wheel::Conversion>,
+    /// What the wheel's smart slot would do with this file (`--to <name>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smart: Option<SmartFormat>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFormat {
+    pub name: String,
+    pub label: String,
+    pub hint: String,
+    /// It installs into the computer (fonts, LUTs, After Effects): AI apps can't start it.
+    pub installs: bool,
 }
 
 pub fn formats_of(files: &[PathBuf]) -> Vec<FileFormats> {
@@ -1059,7 +1090,10 @@ pub fn formats_of(files: &[PathBuf]) -> Vec<FileFormats> {
         .iter()
         .map(|f| {
             let ext = ext_of(f);
-            FileFormats { path: f.clone(), family: wheel::family_of(&ext).map(|(_, l)| l), bytes: engine::disk_size(f), conversions: wheel::conversions_for(&ext) }
+            let smart = crate::smart::offer(std::slice::from_ref(f)).filter(|o| !o.blocked).and_then(|o| {
+                Some(SmartFormat { name: crate::smart::word_of(&o.id)?.to_string(), label: o.label.clone(), hint: o.hint.clone(), installs: crate::smart::installs(&o.id) })
+            });
+            FileFormats { path: f.clone(), family: wheel::family_of(&ext).map(|(_, l)| l), bytes: engine::disk_size(f), conversions: wheel::conversions_for(&ext), smart }
         })
         .collect()
 }
@@ -1073,16 +1107,21 @@ fn run_formats(files: &[PathBuf], json: bool) -> i32 {
     let style = Style { on: std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none() && enable_ansi() };
     for f in &list {
         let name = engine::file_name(&f.path);
-        match &f.family {
-            None => outln!("  {name} · {}", style.red("Convertino can't convert this kind of file")),
-            Some(fam) => {
-                outln!("  {name} · {} · {}", fam.to_lowercase(), engine::human_size(f.bytes));
+        match (&f.family, &f.smart) {
+            (None, None) => outln!("  {name} · {}", style.red("Convertino can't convert this kind of file")),
+            (fam, smart) => {
+                outln!("  {name} · {} · {}", fam.as_deref().unwrap_or("other").to_lowercase(), engine::human_size(f.bytes));
+                if let Some(s) = smart {
+                    outln!("  {}  {}: {}", style.paint("36", &s.name), s.label, s.hint);
+                }
                 let names: Vec<String> = f.conversions.iter().map(|c| c.name.clone()).collect();
-                outln!("  {}", style.paint("36", &names.join("  ")));
+                if !names.is_empty() {
+                    outln!("  {}", style.paint("36", &names.join("  ")));
+                }
             }
         }
     }
-    if list.iter().any(|f| f.family.is_none()) { EXIT_FAILED } else { EXIT_OK }
+    if list.iter().any(|f| f.family.is_none() && f.smart.is_none()) { EXIT_FAILED } else { EXIT_OK }
 }
 
 fn run_tools_status(json: bool) -> i32 {

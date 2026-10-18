@@ -99,11 +99,14 @@ struct Done {
     /// Undo puts the originals back (the results had replaced them).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     replaced: bool,
+    /// What the pointer ring's pill says instead of "Saved <file>" ("Installed 8 fonts").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pill: Option<String>,
 }
 
 impl Done {
     fn plain(id: u64, ok: bool, title: String, body: String, can_undo: bool) -> Done {
-        Done { id, ok, title, body, can_undo, attention: false, fix: None, report: false, compare: false, via: None, details: None, resume: None, replaced: false }
+        Done { id, ok, title, body, can_undo, attention: false, fix: None, report: false, compare: false, via: None, details: None, resume: None, replaced: false, pill: None }
     }
 }
 
@@ -115,6 +118,7 @@ fn done_title(target_id: &str, label: &str) -> String {
         "image.compress" | "raw.compress" | "video.compress" | "pdf.compress" | "audio.compress" if label == "Compress" => "Compressed".into(),
         "image.compress" | "raw.compress" | "video.compress" | "pdf.compress" | "audio.compress" => format!("Compressed to {label}"),
         "audio.trim" => "Trimmed silence".into(),
+        "video.mute" => "Removed the sound".into(),
         "audio.normalize" => "Normalized loudness".into(),
         "video.mp3" | "video.wav" => format!("Extracted audio as {label}"),
         _ => format!("Converted to {label}"),
@@ -134,6 +138,7 @@ pub fn start(
     quality: Option<crate::settings::Quality>,
     wait_for_dialog: Option<isize>,
     size: Option<crate::size::Ask>,
+    smart: Option<serde_json::Value>,
 ) -> u64 {
     let id = crate::engine::new_id();
     std::thread::spawn(move || {
@@ -164,7 +169,9 @@ pub fn start(
         }
 
         let quality = quality.unwrap_or_else(|| crate::settings::get().quality);
-        let (steps, mut notes) = match convert::plan_sized(&target_id, &files, &quality, size) {
+        let is_smart = crate::smart::is_smart(&target_id);
+        let planned = if is_smart { crate::smart::plan(&target_id, &files, smart.as_ref()).map(|s| (s, Vec::new())) } else { convert::plan_sized(&target_id, &files, &quality, size) };
+        let (steps, mut notes) = match planned {
             Ok(s) => s,
             // Every file is already small enough: nothing to do, and that's fine.
             Err(reason) if reason.starts_with(crate::size::ALREADY) => {
@@ -175,7 +182,8 @@ pub fn start(
             Err(reason) => {
                 log::info!("job {id}: {target_id} not available: {reason}");
                 let report = crate::report::remember(id, &target_id, &files, &[reason.clone()]);
-                emit(&app, "job-done", Done { report, ..Done::plain(id, false, format!("Can't convert to {label} yet"), reason, false) });
+                let title = if is_smart { format!("Couldn't {}", label.to_lowercase()) } else { format!("Can't convert to {label} yet") };
+                emit(&app, "job-done", Done { report, ..Done::plain(id, false, title, reason, false) });
                 return;
             }
         };
@@ -190,7 +198,12 @@ pub fn start(
 
         let size: u64 = made.iter().map(|p| disk_size(p)).sum();
         let report = !errors.is_empty() && crate::report::remember(id, &target_id, &files, &errors);
-        let done = if cancelled {
+        // A smart action that wrote its own card (fonts: "Installed 8 fonts").
+        let own = if is_smart && errors.is_empty() && !cancelled { crate::smart::take_done(id) } else { None };
+        let done = if let Some((title, body, changed)) = own {
+            let body = notes.iter().fold(body, |b, n| format!("{b}\n{n}"));
+            Done { pill: Some(title.clone()), ..Done::plain(id, true, title, body, changed) }
+        } else if cancelled {
             Done::plain(
                 id,
                 !made.is_empty(),
@@ -208,7 +221,7 @@ pub fn start(
                 ..Done::plain(
                     id,
                     false,
-                    format!("Couldn't convert to {label}"),
+                    if is_smart { format!("Couldn't {}", label.to_lowercase()) } else { format!("Couldn't convert to {label}") },
                     errors.first().cloned().unwrap_or_else(|| "Unknown error".into()),
                     false,
                 )
@@ -247,10 +260,17 @@ pub fn start(
                 }
             }
             let attention = fix.is_some() || body.contains('\n');
-            Done { attention, fix, report, compare, ..Done::plain(id, true, done_title(&target_id, &label), body, true) }
+            let title = crate::smart::done_title(&target_id, made.len()).unwrap_or_else(|| done_title(&target_id, &label));
+            let pill = match made.as_slice() {
+                [one] if target_id == crate::smart::FIX_NAME => Some(format!("Renamed to {}", file_name(one))),
+                _ => None,
+            };
+            Done { attention, fix, report, compare, pill, ..Done::plain(id, true, title, body, true) }
         };
+        // Fonts, LUTs, presets and renames have their own Undo (smart::undo):
+        // their results aren't moved to the bin.
         if let Ok(mut o) = outputs_map().lock() {
-            o.insert(id, made);
+            o.insert(id, if crate::smart::own_undo(&target_id) { Vec::new() } else { made });
         }
         emit(&app, "job-done", done);
     });
@@ -490,9 +510,13 @@ pub fn select_in_folder(first: &std::path::Path) -> Result<(), String> {
 /// Moves a job's outputs to the Recycle Bin / Trash (folder jobs: their new
 /// folders whole; after Replace, the originals come back too).
 pub fn undo(id: u64) -> Result<usize, String> {
+    let own = match crate::smart::undo(id) {
+        Some(r) => r?,
+        None => 0,
+    };
     let files = outputs_map().lock().ok().and_then(|mut o| o.remove(&id)).unwrap_or_default();
     let replaced = folder_jobs().lock().ok().and_then(|mut f| f.get_mut(&id).map(|j| (std::mem::take(&mut j.replaced), j.started)));
-    let mut n = 0;
+    let mut n = own;
     if let Some((list, _)) = replaced.filter(|(l, _)| !l.is_empty()) {
         n += crate::folder::undo_replace(&list)?;
     }
@@ -502,7 +526,7 @@ pub fn undo(id: u64) -> Result<usize, String> {
     }
     trash::delete_all(&existing).map_err(|e| format!("Couldn't move to the Recycle Bin: {e}"))?;
     log::info!("job {id}: undone, {} file(s) moved to the bin", existing.len());
-    Ok(existing.len())
+    Ok(n + existing.len())
 }
 
 // ---------- folder jobs (see folder.rs) ----------

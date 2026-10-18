@@ -1,4 +1,7 @@
 # Converts every sample in test-files the way the wheel would, into test-files\results.
+# Builds and tests run below normal priority (the programs they start inherit it),
+# so games and other apps stay smooth while they work.
+try { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' } catch {}
 # The summary is test-files\results\smoke-report.txt (also mirrored to logs\smoke.log).
 $root = Split-Path -Parent $PSScriptRoot
 $log = Join-Path $root 'logs\smoke.log'

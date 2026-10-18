@@ -116,6 +116,12 @@ fn unpack(archive: &Path, dest: &Path, progress: &mut dyn FnMut(f64)) -> Result<
 
 /// Extracts into `dir` (next to the archive, normally) and returns what was made.
 pub fn extract(archive: &Path, dir: &Path, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String> {
+    extract_named(archive, dir, &archive_stem(archive), progress)
+}
+
+/// The same, naming the folder `stem` when the archive holds several items
+/// (an archive in parts is named after the parts' common name).
+pub fn extract_named(archive: &Path, dir: &Path, stem: &str, progress: &mut dyn FnMut(f64)) -> Result<PathBuf, String> {
     let dir = dir.to_path_buf();
     // Unpack beside the archive so the final move is a rename, not a copy.
     let scratch = dir.join(format!(".convertino-extract-{}", std::process::id()));
@@ -149,7 +155,7 @@ pub fn extract(archive: &Path, dir: &Path, progress: &mut dyn FnMut(f64)) -> Res
             target
         }
         _ => {
-            let name = Reserved::new(&dir, &archive_stem(archive), "");
+            let name = Reserved::new(&dir, stem, "");
             let target = name.0.clone();
             std::fs::create_dir(&target).map_err(|e| format!("Couldn't create {}: {e}", target.display()))?;
             for item in inside {
@@ -206,6 +212,39 @@ mod tests {
         assert_eq!(archive_stem(Path::new("/x/photos.tar.gz")), "photos");
         assert_eq!(archive_stem(Path::new("/x/My.Notes.zip")), "My.Notes");
         assert_eq!(archive_stem(Path::new("/x/backup.TGZ")), "backup");
+    }
+
+    /// Through the whole job path (convert::run), as the wheel runs it: the
+    /// folder gets the plain name, not "Brand Kit (1)".
+    #[test]
+    fn extract_through_a_job_keeps_the_plain_name() {
+        if tools::find(Tool::SevenZip).is_none() {
+            return;
+        }
+        let d = std::env::temp_dir().join(format!("convertino-archive-job-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let make = |name: &str, files: &[&str]| {
+            let p = d.join(name);
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
+            for f in files {
+                z.start_file(*f, zip::write::SimpleFileOptions::default()).unwrap();
+                std::io::Write::write_all(&mut z, b"x").unwrap();
+            }
+            z.finish().unwrap();
+            p
+        };
+        let kit = make("Brand Kit.zip", &["Brand Kit/a.txt", "Brand Kit/b.txt"]);
+        let loose = make("Loose.zip", &["a.txt", "b.txt"]);
+        for (zip, want) in [(&kit, "Brand Kit"), (&loose, "Loose")] {
+            let steps = crate::convert::plan("archive.extract", std::slice::from_ref(zip)).unwrap();
+            let made = crate::convert::run(&steps[0], &mut |_| {}).unwrap();
+            assert_eq!(made, d.join(want));
+        }
+        // A second time, the name is taken: then (1), as Explorer does.
+        let steps = crate::convert::plan("archive.extract", std::slice::from_ref(&kit)).unwrap();
+        let again = crate::convert::run(&steps[0], &mut |_| {}).unwrap();
+        assert_ne!(again, d.join("Brand Kit"));
     }
 
     #[test]

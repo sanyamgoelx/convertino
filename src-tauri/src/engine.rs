@@ -232,6 +232,10 @@ pub fn convert(id: u64, req: &Request, sink: &Sink) -> Result<Outcome, String> {
         Plan::NothingToDo(why) => Ok(Outcome { notes: vec![why], ..Outcome::default() }),
         Plan::Steps { steps, notes } => {
             let mut out = run_steps(id, &steps, req.out_dir.as_deref(), sink);
+            // A smart action's own summary ("Installed 8 fonts. Left out: …").
+            if let Some((title, body, _)) = crate::smart::take_done(id) {
+                out.notes.insert(0, format!("{title}. {}", body.replace('\n', " ")));
+            }
             // "Already compact" isn't a failure: there was just nothing to gain.
             let (compact, failed): (Vec<_>, Vec<_>) = out.failed.drain(..).partition(|(_, e)| e.contains("is already compact"));
             out.failed = failed;

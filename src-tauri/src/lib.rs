@@ -20,6 +20,7 @@ mod convert;
 mod data;
 mod engine;
 mod folder;
+mod fonts;
 mod holding;
 mod image_edit;
 mod install;
@@ -31,6 +32,8 @@ mod procs;
 mod raw;
 mod report;
 mod settings;
+mod smart;
+mod sniff;
 mod shell;
 mod siblings;
 mod size;
@@ -179,6 +182,7 @@ fn wheel_pick(
     quality: Option<settings::Quality>,
     remember: Option<bool>,
     size: Option<size::Ask>,
+    smart: Option<serde_json::Value>,
 ) -> u64 {
     settings::record_pick(&target_id);
     if wheel::opens_window(&target_id) {
@@ -199,6 +203,10 @@ fn wheel_pick(
         .ok()
         .and_then(|w| w.clone())
         .map(|m| {
+            // The smart slot works on what it found (wheel::smart_slot).
+            if family == "smart" {
+                return m.smart_files;
+            }
             m.files
                 .into_iter()
                 .filter(|f| f.family == family && wheel::target_applies(&target_id, &f.ext))
@@ -206,6 +214,13 @@ fn wheel_pick(
                 .collect()
         })
         .unwrap_or_default();
+    if let (Some(o), Some(true)) = (&smart, remember) {
+        let (id, o) = (target_id.clone(), o.clone());
+        settings::update(|s| {
+            s.smart.insert(id, o);
+        });
+        settings_changed(&app);
+    }
     log::info!("picked {target_id} ({label}) for {} file(s)", files.len());
     let _ = app.emit_to(
         "main",
@@ -223,7 +238,7 @@ fn wheel_pick(
     }
     let files = files.into_iter().map(std::path::PathBuf::from).collect();
     let pending = state.wheel.lock().ok().and_then(|w| w.as_ref().and_then(|m| m.pending_dialog));
-    let id = jobs::start(app, target_id, label, family, files, ring, quality.map(|q| q.clamped()), pending, size);
+    let id = jobs::start(app, target_id, label, family, files, ring, quality.map(|q| q.clamped()), pending, size, smart);
     if ring {
         if let Ok(mut r) = state.ring.lock() {
             *r = Some(id);
@@ -1038,8 +1053,12 @@ async fn choose_folder() -> Option<String> {
     tauri::async_runtime::spawn_blocking(pick_folder).await.ok().flatten()
 }
 
-#[cfg(windows)]
 fn pick_folder() -> Option<String> {
+    pick_folder_titled("Save converted files in")
+}
+
+#[cfg(windows)]
+fn pick_folder_titled(title: &str) -> Option<String> {
     use ::windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
     use ::windows::Win32::UI::Shell::{FileOpenDialog, IFileOpenDialog, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, SIGDN_FILESYSPATH};
     unsafe {
@@ -1047,7 +1066,7 @@ fn pick_folder() -> Option<String> {
         let result = (|| -> ::windows::core::Result<String> {
             let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
             dialog.SetOptions(dialog.GetOptions()? | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)?;
-            dialog.SetTitle(&::windows::core::HSTRING::from("Save converted files in"))?;
+            dialog.SetTitle(&::windows::core::HSTRING::from(title))?;
             dialog.Show(None)?;
             let item = dialog.GetResult()?;
             let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
@@ -1061,9 +1080,10 @@ fn pick_folder() -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn pick_folder() -> Option<String> {
+fn pick_folder_titled(title: &str) -> Option<String> {
+    let script = format!("POSIX path of (choose folder with prompt \"{}\")", title.replace('"', "'"));
     let out = std::process::Command::new("osascript")
-        .args(["-e", "POSIX path of (choose folder with prompt \"Save converted files in\")"])
+        .args(["-e", &script])
         .output()
         .ok()?;
     let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -1071,8 +1091,22 @@ fn pick_folder() -> Option<String> {
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-fn pick_folder() -> Option<String> {
+fn pick_folder_titled(_title: &str) -> Option<String> {
     None
+}
+
+/// The smart slot's options card: "Change…" next to a folder option.
+#[tauri::command]
+async fn smart_pick_folder(title: String) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || pick_folder_titled(&title)).await.ok().flatten()
+}
+
+/// The smart slot's options card: the slot as these options would make it
+/// (the button's count, the hint's lines), so what's shown is what runs.
+#[tauri::command]
+fn smart_preview(state: tauri::State<'_, AppState>, target_id: String, opts: serde_json::Value) -> Option<smart::Offer> {
+    let files: Vec<PathBuf> = state.wheel.lock().ok()?.as_ref()?.smart_files.iter().map(PathBuf::from).collect();
+    smart::offer_for(&target_id, &files, Some(&opts))
 }
 
 // ---------- Settings › Quality › Tune ----------
@@ -1875,6 +1909,8 @@ pub fn run() {
             converters_check,
             wheel_model,
             wheel_pick,
+            smart_preview,
+            smart_pick_folder,
             folder_pick,
             folder_fit_presets,
             folder_fit_preview,

@@ -32,10 +32,38 @@ keyboard, the shortcut is there too; change it to anything you like in
   ODT, HTML, Markdown or text. No Microsoft Office needed.
 - **Data** (CSV, TSV, JSON, YAML, XML) to Excel, CSV, JSON, YAML or TSV.
 - **Archives** (ZIP, 7z, RAR, TAR, …): extract, or pack into ZIP, 7z or TAR.GZ.
+- **Fonts** (TTF, OTF, WOFF, WOFF2) to WOFF2 or WOFF for websites and Shopify themes, and
+  web fonts back to the TTF or OTF inside.
 - **Compress to a size:** pick a size (say 25 MB for an email) and Convertino makes the file fit.
 
 A progress ring shows at the pointer, and every conversion can be undone. Shift+click a
 format on the wheel to set options for that one conversion.
+
+## Smart actions
+
+Convertino looks at what a file really is before the wheel opens. When it recognises
+something it can finish in one click, the **first slot** (tinted, key 1, or just press
+Enter) does it, and its hint says exactly what will happen:
+
+- **Install fonts** from a zip (or loose font files): straight into the fonts folder,
+  nothing unzipped next to the zip. Just you (no admin prompt) or everyone on the PC;
+  OTF or TTF when a pack has both; fonts already installed, duplicates and web fonts are
+  left out and counted. Undo uninstalls them.
+- **Extract**: a zip holding one folder becomes that folder (no `Kit\Kit`), one file
+  comes out alone; **Extract all** unpacks zips inside zips; **Join and extract** an
+  archive in parts (`.zip.001`, `.part1.rar`) from any part, and says which part is missing.
+- **Fix name**: a `.jpg` that's really a WebP (or a download with no extension) gets the
+  right extension; the rest of the wheel treats it as what it is.
+- **Extract media** from Word, PowerPoint and Excel files, **Extract images** from PDFs
+  (as stored, a JPG stays a JPG), **Fix for Excel** (CSVs with ₹ or हिन्दी, or
+  semicolons), **Split sound** (game and mic tracks of a recording as WAVs, or one mixed
+  copy), **Save subtitles** from a video as SRT.
+- **Install LUTs** into Premiere Pro's Lumetri looks, and **Install for After Effects**
+  (presets into User Presets, panels into ScriptUI Panels).
+
+Shift+click the smart slot for its options. On the command line: `--to fonts`,
+`extract-all`, `join`, `fix-name`, `media`, `images`, `excel`, `split-sound`,
+`subtitles`, `luts`, `ae`. AI apps can use the ones that make files, not the installs.
 
 ## Folders
 
