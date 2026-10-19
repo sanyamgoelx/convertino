@@ -114,6 +114,19 @@
         <span class="state" data-state-for="learn"></span>
         <button type="button" class="switch" role="switch" data-key="learn" aria-labelledby="learn-title"><span></span></button>
       </div>
+      <div class="card row">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z M17 9a4 4 0 010 6 M19.5 6.5a7.5 7.5 0 010 11"/></svg>
+        <div class="grow"><div id="sounds-title">Sounds</div><div class="sub">A soft click when the wheel opens, a tick as you move between options, and a firmer one when you pick. Quiet, and it follows your system volume.</div></div>
+        <button type="button" class="btn" id="sounds-try">Try it</button>
+        <span class="state" data-state-for="wheelSounds"></span>
+        <button type="button" class="switch" role="switch" data-key="wheelSounds" aria-labelledby="sounds-title"><span></span></button>
+      </div>
+      <div class="card row" id="haptics-card" hidden>
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z M9 19v-4h6v4"/></svg>
+        <div class="grow"><div id="haptics-title">Trackpad ticks</div><div class="sub">Feel a tick on a Force Touch trackpad as you move between options and when you pick one. Nothing happens with a mouse.</div></div>
+        <span class="state" data-state-for="wheelHaptics"></span>
+        <button type="button" class="switch" role="switch" data-key="wheelHaptics" aria-labelledby="haptics-title"><span></span></button>
+      </div>
       <div class="chips" role="tablist" aria-label="Kind of file" id="fams"></div>
       <div class="wheel-edit">
         <div class="card list" id="slots" aria-label="Formats, in wheel order"></div>

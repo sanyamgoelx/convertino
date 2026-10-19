@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "convertino"
-version = "0.2.11"
+version = "0.2.12"
 dependencies = [
  "brotli 8.0.4",
  "csv",

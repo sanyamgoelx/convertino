@@ -255,6 +255,7 @@ function render() {
   $("folder-path").title = s.saveFolder || "";
   $("handoff").value = String(s.handoffSeconds);
   $("handoff").disabled = !s.progressRing;
+  $("haptics-card").hidden = !isMac();
 
   renderWheel();
   renderQuality();
@@ -865,6 +866,11 @@ document.querySelectorAll(".switch[data-key]").forEach((el) => el.addEventListen
   save({ [k]: !view.settings[k] });
 }));
 $("rec-start").addEventListener("click", startRecording);
+// Plays the wheel's sounds as you'd hear them: opening, moving across three options, picking one,
+// even while Sounds is off (so you can decide).
+$("sounds-try").addEventListener("click", () => {
+  [["open", 0], ["tick", 380], ["tick", 520], ["tick", 660], ["pick", 1000]].forEach(([kind, at]) => setTimeout(() => invoke("wheel_feel_preview", { kind }).catch(() => {}), at));
+});
 $("perm-ax-btn").addEventListener("click", () => invoke("permissions_request", { kind: "accessibility" }).then(refreshPerms));
 $("perm-finder-btn").addEventListener("click", () => invoke("permissions_request", { kind: "finder" }).then(() => setTimeout(refreshPerms, 500)));
 $("rec-cancel").addEventListener("pointerdown", (e) => { e.preventDefault(); stopRecording(); });
@@ -1235,7 +1241,7 @@ function demoInvoke(cmd, args) {
   const d = (window.__demo = window.__demo || {
     settings: {
       shortcut: "ctrl+alt+shift+KeyC", altClick: true, startAtLogin: true, progressRing: true, saveMode: "next", saveFolder: null,
-      handoffSeconds: 2, learn: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {}, aiApps: true, aiCard: true, askClaude: true, askMode: "chat",
+      handoffSeconds: 2, learn: true, wheelSounds: true, wheelHaptics: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {}, aiApps: true, aiCard: true, askClaude: true, askMode: "chat",
     },
     shortcut: "ctrl+alt+shift+KeyC",
     families: [

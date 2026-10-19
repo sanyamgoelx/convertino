@@ -115,6 +115,10 @@ pub struct Settings {
     pub handoff_seconds: u32,
     /// Put the most-picked formats first.
     pub learn: bool,
+    /// A soft tick as the wheel's highlight moves, and a sound when an option is picked (feel.rs).
+    pub wheel_sounds: bool,
+    /// macOS: the same ticks felt on a Force Touch trackpad (ignored elsewhere).
+    pub wheel_haptics: bool,
     /// Per kind of file: target ids in the order chosen in Settings.
     pub order: BTreeMap<String, Vec<String>>,
     /// Target ids hidden from the wheel.
@@ -157,6 +161,8 @@ impl Default for Settings {
             save_folder: None,
             handoff_seconds: 2,
             learn: true,
+            wheel_sounds: true,
+            wheel_haptics: true,
             order: BTreeMap::new(),
             hidden: BTreeSet::new(),
             quality: Quality::default(),
@@ -419,6 +425,7 @@ mod tests {
         assert_eq!(s.quality.webp, 85);
         assert_eq!(s.handoff_seconds, 2);
         assert!(s.progress_ring);
+        assert!(s.wheel_sounds, "wheel sounds are on unless turned off");
     }
 
     #[test]

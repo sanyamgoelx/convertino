@@ -19,6 +19,7 @@ mod connect;
 mod convert;
 mod data;
 mod engine;
+mod feel;
 mod folder;
 mod fonts;
 mod holding;
@@ -495,6 +496,23 @@ fn ring_mode(app: AppHandle) -> RingLayout {
 fn ring_interactive(app: AppHandle, on: bool) {
     if let Some(win) = app.get_webview_window("wheel") {
         let _ = win.set_ignore_cursor_events(!on);
+    }
+}
+
+/// The wheel's highlight moved ("tick") or an option was picked ("pick"):
+/// plays the sound / trackpad tick the settings allow (feel.rs).
+#[tauri::command]
+fn wheel_feel(app: AppHandle, kind: String) {
+    if let Some(k) = feel::Kind::from_word(&kind) {
+        feel::wheel(&app, k);
+    }
+}
+
+/// Settings' "Try it": the sounds, whatever the switch says.
+#[tauri::command]
+fn wheel_feel_preview(kind: String) {
+    if let Some(k) = feel::Kind::from_word(&kind) {
+        feel::preview(k);
     }
 }
 
@@ -1942,6 +1960,8 @@ pub fn run() {
             compare_show,
             ring_mode,
             ring_interactive,
+            wheel_feel,
+            wheel_feel_preview,
             ring_handoff,
             ring_end,
             editor_file,
@@ -1978,6 +1998,8 @@ pub fn run() {
             alt_click::ENABLED.store(prefs.alt_click, Ordering::SeqCst);
             // Keeps the startup entry pointing at this copy of Convertino (it may have moved).
             settings::apply_start_at_login(prefs.start_at_login);
+            // The wheel's sounds, made (and on Mac loaded) before the first tick.
+            std::thread::spawn(feel::prepare);
             // Corner cards for AI apps' jobs; connected AI apps follow this copy if it moved.
             ai::start(app.handle().clone());
             // Settings moved to the FFmpeg build with x264/x265: swap an older copy in the background.

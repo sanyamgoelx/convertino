@@ -1,6 +1,6 @@
 [package]
 name = "convertino"
-version = "0.2.11"
+version = "0.2.12"
 description = "Convert any file from a radial wheel in Explorer or Finder"
 authors = ["Crofty"]
 license = "GPL-3.0-or-later"
@@ -54,6 +54,7 @@ flate2 = "1"
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
+  "Win32_Media_Audio",
   "Win32_System_Com",
   "Win32_System_Console",
   "Win32_System_Ole",

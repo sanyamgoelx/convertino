@@ -152,12 +152,30 @@ function setAskHover(on) {
 
 function ask(withChoice) {
   if (busy || !showAsk()) return;
+  feel("pick");
   if (withChoice && model.ask.modes.length > 1) return showAskOptions();
   askGo(null, false);
 }
 
 function askGo(mode, remember) {
   animateOut(() => tauri && tauri.core.invoke("ask_claude", { mode, remember }).catch((e) => console.error(e)));
+}
+
+// ---------- feel ----------
+// A soft click when the wheel opens, a detent tick when the highlight moves to
+// another option, a firmer press when one is picked (Settings > Wheel). Rust decides from the settings whether anything
+// plays (feel.rs), so the switch and what you hear can't disagree. Ticks less
+// than 35 ms apart are dropped there too; this only saves the round trip.
+
+let lastTick = 0;
+function feel(kind) {
+  if (!tauri) return;
+  if (kind === "tick") {
+    const now = performance.now();
+    if (now - lastTick < 35) return;
+    lastTick = now;
+  }
+  tauri.core.invoke("wheel_feel", { kind }).catch(() => {});
 }
 
 function setActive(i) {
@@ -469,6 +487,7 @@ let openCount = 0;          // bumps on every open, so a stale pick can tell
 
 function open(m) {
   openCount++;
+  feel("open");
   hideOptions();
   resetRing();
   early.clear();
@@ -516,6 +535,7 @@ function choose(i, withOptions = false) {
   if (busy) return;
   const s = slots[i];
   if (!s) return;
+  if (!(s.smart && s.blocked)) feel("pick");
   if (s.kind === "more") return showPage("more");
   if (s.kind === "back") return showPage("main");
   if (s.kind === "size") return startSize(s.bytes, s.label, null);
@@ -1254,10 +1274,16 @@ document.addEventListener("pointermove", (e) => {
   if (!model || busy || ring || optsFor) return;
   if (size && e.target.closest && e.target.closest(".hub, .hint")) return;
   const onAsk = !!(e.target.closest && e.target.closest(".ask"));
+  if (onAsk && !askHover) feel("tick");
   if (onAsk || askHover) setAskHover(onAsk);
   if (onAsk) return;
   const i = indexAt(e.clientX, e.clientY);
-  if (i !== active) setActive(i);
+  if (i !== active) {
+    // Only landing on an option ticks; leaving the ring (to the centre or
+    // outside) is silent.
+    if (i >= 0) feel("tick");
+    setActive(i);
+  }
 });
 
 document.addEventListener("click", (e) => {
@@ -1282,8 +1308,8 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return page === "more" ? showPage("main") : close();
   }
-  if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); return setActive((active + 1 + n) % n); }
-  if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); return setActive(active <= 0 ? n - 1 : active - 1); }
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); if (n) feel("tick"); return setActive((active + 1 + n) % n); }
+  if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); if (n) feel("tick"); return setActive(active <= 0 ? n - 1 : active - 1); }
   if (e.key === "Enter" && active >= 0) { e.preventDefault(); return choose(active, e.shiftKey); }
   // Nothing pointed at: Enter picks the smart slot.
   if (e.key === "Enter" && slots[0] && slots[0].smart && !slots[0].blocked) { e.preventDefault(); setActive(0); return choose(0, e.shiftKey); }
