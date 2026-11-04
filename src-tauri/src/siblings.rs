@@ -27,7 +27,9 @@ pub fn announce() {
         "version": env!("CARGO_PKG_VERSION"),
         "app": app.map(|p| p.to_string_lossy().into_owned()),
         "cli": crate::connect::cli_path().map(|p| p.to_string_lossy().into_owned()),
-        "can": ["convert", "compress", "check-copy", "hold", "compare"],
+        "can": ["convert", "compress", "check-copy", "hold", "compare", "wheel"],
+        // How to ask for the wheel (request.rs): app --wheel --at X,Y --from NAME -- <files>
+        "wheel": ["--wheel", "--at", "{x},{y}", "--from", "{caller}", "--"],
         "repo": "sanyamgoelx/convertino",
         "written": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
     });

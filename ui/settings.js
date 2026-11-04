@@ -20,8 +20,8 @@ const QDEFAULT = { jpg: 90, webp: 85, resize: 1920, convertMax: 0, dpi: 150, pdf
 const QGROUPS = [
   { title: "Images", rows: [
     { k: "image", tune: "image", label: "Picture quality", desc: "Convertino tries a few settings and keeps the smallest file that still looks like the original. Also used for PDF pages and Compress", options: [["small", "Smaller: looks very close"], ["balanced", "Balanced: looks the same (recommended)"], ["best", "Best: the same, even side by side"], ["fixed", "Fixed: use the numbers below"]] },
-    { k: "jpg", label: "Fixed JPG quality", desc: "Only when Picture quality is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
-    { k: "webp", label: "Fixed WebP quality", desc: "Only when Picture quality is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
+    { k: "jpg", fixedOnly: true, label: "Fixed JPG quality", desc: "Only when Picture quality is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
+    { k: "webp", fixedOnly: true, label: "Fixed WebP quality", desc: "Only when Picture quality is Fixed. Higher is sharper and bigger", min: 50, max: 100 },
     { k: "convertMax", label: "Resize large pictures", desc: "When converting: bigger pictures are scaled down, smaller ones are left as they are",
       options: [[0, "Don't resize"], [3840, "Up to 3840 px"], [2560, "Up to 2560 px"], [1920, "Up to 1920 px"], [1280, "Up to 1280 px"]] },
   ] },
@@ -212,6 +212,7 @@ function setPage(p) {
   if (p === "watch") takePendingWatch();
   if (p === "ai") refreshAi();
   if (p === "quality") loadTuneInfo();
+  if (p === "about") checkOnOpen();
 }
 
 function render() {
@@ -255,7 +256,13 @@ function render() {
   $("folder-path").title = s.saveFolder || "";
   $("handoff").value = String(s.handoffSeconds);
   $("handoff").disabled = !s.progressRing;
+  $("handoff-card").classList.toggle("off", !s.progressRing);
+  $("handoff-sub").textContent = s.progressRing
+    ? "Quicker ones finish in the ring at the pointer"
+    : "Not used: Show progress at the pointer is off, so every conversion goes to the corner card";
   $("haptics-card").hidden = !isMac();
+  const alt = isMac() ? "\u2325" : "Alt+";
+  $("wheel-help").textContent = `Drag rows (or use ${alt}\u2191 and ${alt}\u2193) to reorder. Up to 8 fit on the main ring; with more than 8, the first 7 stay and the rest go behind More.`;
 
   renderWheel();
   renderQuality();
@@ -282,6 +289,20 @@ function ringOf(shown) {
   return shown.length > 8 ? shown.slice(0, 7).map((t) => t.label).concat(["More"]) : shown.map((t) => t.label);
 }
 
+// The order the wheel really uses (wheel.rs `arranged`): the chosen order without
+// hidden formats (all of them if every one is hidden), then, with "Put the formats
+// I pick most first", formats picked 2+ times move forward (stable, most picks first).
+function wheelOrder(f) {
+  const s = view.settings;
+  let list = f.targets.filter((t) => !t.hidden);
+  if (!list.length) list = f.targets.slice();
+  if (s.learn) {
+    const picks = (t) => { const n = (s.picks || {})[t.id] || 0; return n >= 2 ? n : 0; };
+    list = list.map((t, i) => [t, i]).sort((a, b) => picks(b[0]) - picks(a[0]) || a[1] - b[1]).map(([t]) => t);
+  }
+  return list;
+}
+
 function pt(c, r, deg) {
   const a = (deg * Math.PI) / 180;
   return (c + r * Math.cos(a)).toFixed(1) + " " + (c + r * Math.sin(a)).toFixed(1);
@@ -293,14 +314,23 @@ function renderWheel() {
   $("fams").innerHTML = view.families.map((x) =>
     `<button type="button" role="tab" data-fam="${x.id}" aria-selected="${x.id === fam}">${esc(x.label)}</button>`).join("");
 
-  const shown = f.targets.filter((t) => !t.hidden);
-  let n = 0;
+  const shown = wheelOrder(f);
+  const allHidden = f.targets.every((t) => t.hidden);
+  const plain = f.targets.filter((t) => !t.hidden);
+  const learned = !allHidden && shown.some((t, i) => t !== plain[i]);
+  const where = (t) => { const i = shown.indexOf(t); return i < 0 ? "Hidden" : shown.length > 8 && i >= 7 ? "More" : "Main ring"; };
+  const note = $("learn-note");
+  note.hidden = !learned && !allHidden;
+  note.textContent = allHidden
+    ? "Every format is hidden, so the wheel shows them all. Tick the ones you want."
+    : learned ? `“Put the formats I pick most first” is on, so the wheel shows ${shown.slice(0, 3).map((t) => t.label).join(", ")} first. Turn it off to use exactly this order.` : "";
   let moreHeader = false;
   $("slots").innerHTML = f.targets.map((t, i) => {
-    if (!t.hidden) n++;
-    const inMore = !t.hidden && shown.length > 8 && n > 7;
+    const w = where(t);
+    const inMore = w === "More";
     let head = "";
-    if (inMore && !moreHeader) { moreHeader = true; head = `<div class="more-head">In “More”</div>`; }
+    // The "In More" divider only makes sense while the list order is the wheel's order.
+    if (inMore && !moreHeader && !learned) { moreHeader = true; head = `<div class="more-head">In “More”</div>`; }
     return head +
       `<div class="slot${t.hidden ? " hidden-slot" : ""}" data-i="${i}" data-id="${t.id}">` +
       `<span class="grip" tabindex="0" role="button" aria-label="Move ${esc(t.label)} (Alt+arrow keys)">` +
@@ -308,7 +338,7 @@ function renderWheel() {
       `<button type="button" class="box" role="checkbox" aria-checked="${!t.hidden}" aria-label="Show ${esc(t.label)} on the wheel">` +
       `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${OK}"/></svg></button>` +
       `<span class="name">${esc(t.label)}</span><span class="hint">${esc(t.hint)}</span>` +
-      `<span class="where">${t.hidden ? "Hidden" : inMore ? "More" : "Main ring"}</span></div>`;
+      `<span class="where">${w}</span></div>`;
   }).join("");
 
   const labels = ringOf(shown);
@@ -414,10 +444,12 @@ function renderQuality() {
       const id = "q-" + r.k;
       const kind = r.tune;
       const grade = kind ? GRADE_OF[q[r.k]] : null;
+      // Fixed numbers only apply while Picture quality is Fixed: grey them out otherwise.
+      const off = r.fixedOnly && q.image !== "fixed";
       const control = r.options
         ? `<select id="${id}" data-q="${r.k}">${r.options.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(q[r.k]) ? " selected" : ""}>${esc(l)}${kind && GRADE_OF[v] && tuneEdited(kind, GRADE_OF[v]) ? " ●" : ""}</option>`).join("")}</select>`
-        : `<input id="${id}" type="range" data-q="${r.k}" min="${r.min}" max="${r.max}" step="1" value="${q[r.k]}"><span class="val" data-v="${r.k}">${q[r.k]}</span>`;
-      if (!kind) return `<div class="qrow"><label for="${id}" class="grow"><div>${esc(r.label)}</div><div class="sub">${esc(r.desc)}</div></label>${control}</div>`;
+        : `<input id="${id}" type="range" data-q="${r.k}" min="${r.min}" max="${r.max}" step="1" value="${q[r.k]}"${off ? " disabled" : ""}><span class="val" data-v="${r.k}">${q[r.k]}</span>`;
+      if (!kind) return `<div class="qrow${off ? " off" : ""}"><label for="${id}" class="grow"><div>${esc(r.label)}</div><div class="sub">${esc(r.desc)}</div></label>${control}</div>`;
       const edited = grade && tuneEdited(kind, grade);
       const open = !!(grade && tuneOpen[kind]);
       const button = `<button type="button" class="btn tune-btn" data-tune="${kind}" aria-expanded="${open}"${grade ? "" : ' disabled title="Fine-tune works with Smaller, Balanced or Best"'}>Fine-tune ${CHEVRON}</button>`;
@@ -749,6 +781,9 @@ function renderConverters() {
   if (!view) return;
   const s = view.settings;
   document.querySelectorAll("[data-ff]").forEach((el) => el.setAttribute("aria-checked", String(s.ffmpegBuild === el.dataset.ff)));
+  // install.rs: Mac builds always have x264/x265 and ignore this choice, so don't offer it there.
+  $("ff-choice").hidden = isMac();
+  $("ff-mac").hidden = !isMac();
   if (!tools.length) return;
   $("tools").innerHTML = tools.map((t) => {
     const p = progress[t.id];
@@ -779,6 +814,8 @@ function renderConverters() {
   const mb = missing.reduce((a, t) => a + t.downloadMb, 0);
   $("get-all").textContent = missing.length ? `Download all now (about ${mb} MB)` : "All downloaded";
   $("get-all").disabled = !missing.length;
+  // Same numbers as "Using … MB now": only what Convertino downloaded (not converters already on the computer).
+  $("remove-all").textContent = used > 0 ? `Remove downloaded converters (${used} MB)` : "Remove downloaded converters";
   $("remove-all").disabled = view.dev || !tools.some((t) => t.state === "ready");
   $("remove-all").title = view.dev ? "Turned off in development builds" : "";
 }
@@ -935,15 +972,31 @@ function renderUpdate() {
     btn.classList.add("primary");
     btn.disabled = false;
   } else {
-    sub.textContent = `You have the latest version (${update.current}). Checked automatically once a day.`;
+    sub.textContent = checkedAt
+      ? `You have the latest version (${update.current}). Checked ${agoMinutes(checkedAt)}; also checked automatically once a day.`
+      : `You have the latest version (${update.current}). Checked automatically once a day.`;
     btn.textContent = "Check now";
     btn.classList.remove("primary");
     btn.disabled = false;
   }
 }
+// Opening About checks for a newer version (once per Settings window), so it
+// never says "latest" from a day-old check while a newer one is out.
+let checkedAt = 0, autoChecked = false;
+const agoMinutes = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? "just now" : m === 1 ? "a minute ago" : `${m} minutes ago`; };
+async function checkOnOpen() {
+  if (autoChecked || !update || update.dev || update.available || updating) return;
+  autoChecked = true;
+  $("update-sub").textContent = "Checking for a newer version…";
+  $("update-btn").disabled = true;
+  try { update = await invoke("update_check"); checkedAt = Date.now(); } catch (e) { /* offline: keep what was known */ }
+  renderUpdate();
+}
+
 async function loadUpdate() {
   try { update = await invoke("update_status"); } catch (e) { return; }
   renderUpdate();
+  if (page === "about") checkOnOpen();
 }
 $("update-btn").addEventListener("click", async () => {
   const btn = $("update-btn"), sub = $("update-sub");
@@ -956,7 +1009,7 @@ $("update-btn").addEventListener("click", async () => {
   }
   btn.disabled = true;
   sub.textContent = "Checking…";
-  try { update = await invoke("update_check"); } catch (e) { toast(String(e)); }
+  try { update = await invoke("update_check"); checkedAt = Date.now(); } catch (e) { toast(String(e)); }
   btn.disabled = false;
   renderUpdate();
 });
@@ -1031,7 +1084,7 @@ function renderAi() {
 
   const jobs = ai.jobs || [];
   $("ai-jobs").innerHTML = jobs.length
-    ? jobs.map((j, i) => `<div class="item"><div class="grow"><div>${esc(j.what)}</div><div class="sub">${esc(j.client)} · ${ago(j.at)}${j.folder ? " · " + esc(j.folder.split(/[\\/]/).pop()) : ""}</div></div>` +
+    ? jobs.map((j, i) => `<div class="item"><div class="grow"><div>${esc(upperTarget(j.what))}</div><div class="sub">${esc(j.client)} · ${ago(j.at)}${j.folder ? " · " + esc(j.folder.split(/[\\/]/).pop()) : ""}</div></div>` +
         `<span class="perm-state ${j.ok ? "ok" : "todo"}">${esc(j.state)}</span>` +
         (j.folder ? `<button type="button" class="link" data-job="${i}">Show</button>` : "") + `</div>`).join("") +
       `<div class="item"><span class="grow sub">Kept on this computer only</span><button type="button" class="btn" id="ai-clear">Clear</button></div>`
@@ -1122,7 +1175,12 @@ async function loadWatchActions() {
   return watchActions;
 }
 
-function ago(secs) {
+// "12 files → jpg" reads "12 files → JPG", like the wheel's own labels.
+const upperTarget = (what) => String(what).replace(/→\s*([a-z0-9]{2,5})$/i, (m, x) => "→ " + x.toUpperCase());
+
+// Watched folders store Unix seconds; AI jobs (above) store milliseconds. Two
+// functions both named "ago" made the later one win, so every AI job said "just now".
+function agoSecs(secs) {
   const d = Math.max(0, Date.now() / 1000 - secs);
   if (d < 60) return "just now";
   if (d < 3600) return `${Math.round(d / 60)} min ago`;
@@ -1140,13 +1198,17 @@ async function renderWatch() {
   const box = $("watch-list");
   if (!box || !view) return;
   const list = view.settings.watched || [];
+  // Say when watching actually happens: only while Convertino runs.
+  $("watch-when").textContent = view.settings.startAtLogin
+    ? (isMac() ? "(it opens at login)" : "(it starts when you sign in)")
+    : `(“${isMac() ? "Open Convertino at login" : "Start Convertino when I sign in"}” is off, so only once you open it)`;
   const actions = await loadWatchActions();
   if (!list.length) {
-    box.innerHTML = `<div class="item"><div class="grow"><div>No folders yet</div><div class="sub">Alt+right-click a folder › More › Watch this folder…, or choose one here.</div></div></div>`;
+    box.innerHTML = `<div class="item"><div class="grow"><div>No folders yet</div><div class="sub">${isMac() ? "Option-right-click" : "Alt+right-click"} a folder › More › Watch this folder…, or choose one here.</div></div></div>`;
     return;
   }
   box.innerHTML = list.map((w, i) => {
-    const last = w.last ? `Last: ${ago(w.last.at)} · ${esc(w.last.file)} · <span class="${w.last.ok ? "" : "warn"}">${esc(w.last.result)}</span>` : w.on ? "Waiting for a new file" : "Paused";
+    const last = w.last ? `Last: ${agoSecs(w.last.at)} · ${esc(w.last.file)} · <span class="${w.last.ok ? "" : "warn"}">${esc(w.last.result)}</span>` : w.on ? "Waiting for a new file" : "Paused";
     const opt = (pairs, v) => pairs.map(([id, l]) => `<option value="${esc(id)}"${id === v ? " selected" : ""}>${esc(l)}</option>`).join("");
     return `<div class="item watch${w.on ? "" : " off"}" data-i="${i}">` +
       `<div class="grow"><div class="name mono" title="${esc(w.path)}">${esc(w.path)}</div>` +
@@ -1154,6 +1216,7 @@ async function renderWatch() {
       `<select data-w="into" aria-label="Where results go">${opt(INTO, w.into)}</select></div>` +
       `<div class="sub">${esc(intoWords(w))}</div><div class="sub">${last}</div></div>` +
       `<button type="button" class="link" data-w="remove">Remove</button>` +
+      `<span class="state">${w.on ? "On" : "Off"}</span>` +
       `<button type="button" class="switch" role="switch" data-w="on" aria-checked="${w.on}" aria-label="Watch ${esc(w.path)}"><span></span></button></div>`;
   }).join("");
 }
@@ -1241,7 +1304,7 @@ function demoInvoke(cmd, args) {
   const d = (window.__demo = window.__demo || {
     settings: {
       shortcut: "ctrl+alt+shift+KeyC", altClick: true, startAtLogin: true, progressRing: true, saveMode: "next", saveFolder: null,
-      handoffSeconds: 2, learn: true, wheelSounds: true, wheelHaptics: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "lgpl", picks: {}, aiApps: true, aiCard: true, askClaude: true, askMode: "chat",
+      handoffSeconds: 2, learn: true, wheelSounds: true, wheelHaptics: true, order: {}, hidden: [], quality: Object.assign({}, QDEFAULT), ffmpegBuild: "gpl", picks: {}, aiApps: true, aiCard: true, askClaude: true, askMode: "chat",
     },
     shortcut: "ctrl+alt+shift+KeyC",
     families: [

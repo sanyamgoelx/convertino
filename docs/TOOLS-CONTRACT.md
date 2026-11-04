@@ -32,6 +32,17 @@ Each tool writes a small file about itself every time it starts:
 - No file, or its paths are gone: the tool counts as not installed. Fallbacks (PATH, old fixed paths) stay only for tools that already used them.
 - Writing the file is best effort; a tool never fails to start because it can't.
 
+## Opening Convertino's wheel from another app
+
+Convertino's Alt+right-click only acts over Explorer, the desktop and Open/Save windows (it reads Explorer's selection). An app that shows files itself (Dora) asks for the wheel instead, when Convertino's entry lists `"wheel"` under `can`:
+
+`<app> --wheel --at X,Y --from <caller> -- <file or folder>…`
+
+- X,Y: where to centre the wheel, in physical screen pixels (Mac: points). Without `--at`, at the mouse pointer.
+- A running Convertino gets the request through its single-instance hand-over and the launched copy quits at once; if Convertino isn't running it starts (in the tray, Settings not shown) and opens the wheel when ready.
+- Everything after the wheel opens is Convertino's: its ring, its card, Undo. The caller learns about results the usual way (the files appear next to the originals), so it should watch the folder it shows.
+- Older Convertino (no `"wheel"` in `can`): the caller lists conversions with `convertino formats … --json` and runs `convertino … --to <name> --json --progress` itself.
+
 ## Getting another tool
 
 Each tool carries a small built-in list of its siblings (id, name, one line about it, repo, installer name pattern, update public key, public yes/no). Only public tools are ever offered.

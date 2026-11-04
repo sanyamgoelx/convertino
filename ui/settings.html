@@ -94,9 +94,9 @@
         </div>
       </div>
 
-      <div class="card row">
+      <div class="card row" id="handoff-card">
         <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 100 18 9 9 0 000-18z M12 7v5l3 2"/></svg>
-        <label for="handoff" class="grow"><div>Move a conversion to the corner card after</div><div class="sub">Quicker ones finish in the ring at the pointer</div></label>
+        <label for="handoff" class="grow"><div>Move a conversion to the corner card after</div><div class="sub" id="handoff-sub">Quicker ones finish in the ring at the pointer</div></label>
         <select id="handoff">
           <option value="1">1 second</option>
           <option value="2">2 seconds</option>
@@ -128,11 +128,12 @@
         <button type="button" class="switch" role="switch" data-key="wheelHaptics" aria-labelledby="haptics-title"><span></span></button>
       </div>
       <div class="chips" role="tablist" aria-label="Kind of file" id="fams"></div>
+      <div class="sub learn-note" id="learn-note" hidden></div>
       <div class="wheel-edit">
         <div class="card list" id="slots" aria-label="Formats, in wheel order"></div>
         <div class="preview-side">
           <div class="preview" id="preview" aria-hidden="true"></div>
-          <div class="sub center">Drag rows (or use Alt+↑ and Alt+↓) to reorder. Up to 8 fit on the main ring; the rest go behind More.</div>
+          <div class="sub center" id="wheel-help">Drag rows (or use Alt+↑ and Alt+↓) to reorder. Up to 8 fit on the main ring; with more than 8, the first 7 stay and the rest go behind More.</div>
           <button type="button" class="link" id="reset-fam">Reset this kind of file</button>
         </div>
       </div>
@@ -158,7 +159,7 @@
     <section data-page="watch" hidden>
       <div class="tip">
         <svg class="ic sm accent" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z M12 9a3 3 0 100 6 3 3 0 000-6z"/></svg>
-        <span>New files in these folders are converted on their own while Convertino runs (it starts at sign-in). A file is picked up once it has stopped growing, so a recording isn't touched while it's still being written. Files already there are left as they are; for those, Alt+right-click the folder.</span>
+        <span>New files in these folders are converted on their own while Convertino runs <span id="watch-when">(it starts when you sign in)</span>. A file is picked up once it has stopped growing, so a recording isn't touched while it's still being written. Files already there are left as they are; for those, Alt+right-click the folder.</span>
       </div>
       <div class="card list" id="watch-list" aria-label="Watched folders"></div>
       <div class="buttons"><button type="button" class="btn" id="watch-add">Watch a folder…</button></div>
@@ -166,7 +167,10 @@
 
     <!-- ===== Converters ===== -->
     <section data-page="converters" hidden>
-      <div class="tip"><span>Each converter downloads the first time a conversion needs it, so Convertino only takes the space you use. <span class="sub" id="used"></span></span></div>
+      <div class="tip">
+        <svg class="ic sm accent" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11 M7 10.5l5 5 5-5 M5 20h14"/></svg>
+        <span>Each converter downloads the first time a conversion needs it, so Convertino only takes the space you use. <span class="sub" id="used"></span></span>
+      </div>
       <div class="card list" id="tools"></div>
       <div class="buttons">
         <button type="button" class="btn primary" id="get-all">Download all</button>
@@ -181,9 +185,10 @@
           <div class="grow"><div>Encoder in use</div><div class="sub">Chosen automatically: the fastest one that works on this computer</div></div>
           <span class="sub" id="encoder">Checking…</span>
         </div>
-        <div class="radios divider" role="radiogroup" aria-label="FFmpeg build">
+        <div class="sub" id="ff-mac" hidden>The Mac copy of FFmpeg always includes x264 and x265, so there's nothing to choose here.</div>
+        <div class="radios divider" role="radiogroup" aria-label="FFmpeg build" id="ff-choice">
           <button type="button" class="radio top" role="radio" data-ff="lgpl"><span class="dot"></span><span><span class="blk">Standard FFmpeg</span><span class="blk sub">Uses your graphics card for H.264 and H.265</span></span></button>
-          <button type="button" class="radio top" role="radio" data-ff="gpl"><span class="dot"></span><span><span class="blk">FFmpeg with x264 and x265</span><span class="blk sub">Better quality for the same file size, a little slower. Free; downloads about 90 MB.</span></span></button>
+          <button type="button" class="radio top" role="radio" data-ff="gpl"><span class="dot"></span><span><span class="blk">FFmpeg with x264 and x265 <span class="pill">Default</span></span><span class="blk sub">Better quality for the same file size, a little slower. Free; downloads about 90 MB.</span></span></button>
         </div>
       </div>
     </section>
@@ -226,6 +231,7 @@ convertino formats report.docx</pre>
       <div class="card list" id="ai-apps"></div>
       <div class="sub perm-note" id="ai-note">Connect adds Convertino to that app's settings. Restart the app afterwards. Disconnect takes it out again.</div>
       <div class="card row">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H4z M8 20h8 M12 16v4 M14 8h3v3"/></svg>
         <div class="grow"><div id="aicard-title">Show a card while an AI app converts</div><div class="sub" id="aicard-sub">The corner card says which app asked, with Open folder and Undo</div></div>
         <span class="state" data-state-for="aiCard"></span>
         <button type="button" class="switch" role="switch" data-key="aiCard" aria-labelledby="aicard-title"><span></span></button>

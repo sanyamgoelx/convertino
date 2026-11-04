@@ -17,6 +17,7 @@ docs/STATUS.md
 docs/BUILD-PLAN.md
 docs/PLAN-RAW-CLI-MCP.md
 docs/PLAN-SMART-ACTIONS.md
+docs/PLAN-PDF-TEXT-EDIT.md
 docs/*mockup*.html
 more/stats-dump.cmd
 scripts/stats-dump.ps1

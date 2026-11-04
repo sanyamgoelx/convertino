@@ -513,7 +513,12 @@ fn fonts_offer(files: &[PathBuf], look: &mut Look, o: &Value) -> Option<Offer> {
         lines,
         fields,
         go: if n == 0 { "Nothing to install".into() } else { format!("Install {}", plural(n, "font", "fonts")) },
-        hub: (files.len() == 1 && archives).then(|| format!("{} inside", plural(total, "font", "fonts"))),
+        // The hub counts every font in the zip; when fewer will install (duplicates,
+        // web fonts, already installed), it says so, so the hub and the slot agree.
+        hub: (files.len() == 1 && archives).then(|| {
+            let inside = format!("{} inside", plural(total, "font", "fonts"));
+            if n == total { inside } else if n == 0 { format!("{inside} · all installed") } else { format!("{inside} · {n} to install") }
+        }),
         ..Offer::default()
     })
 }
@@ -1985,7 +1990,7 @@ mod tests {
         assert_eq!(o.sub, "2 fonts");
         assert_eq!(o.go, "Install 2 fonts");
         assert!(o.lines.iter().any(|l| l == "Left out: 1 duplicate · 2 web fonts"), "{:?}", o.lines);
-        assert_eq!(o.hub.as_deref(), Some("5 fonts inside"));
+        assert_eq!(o.hub.as_deref(), Some("5 fonts inside · 2 to install"));
         // Shift+click: turn the web-only font into a desktop font too.
         let three = offer_with(&[zip.clone()], Some(&json!({"web": "convert"}))).unwrap();
         assert_eq!(three.go, "Install 3 fonts");

@@ -40,6 +40,8 @@ ssimulacra2 = "0.5"
 # Lossless PNG optimisation.
 oxipng = { version = "10", default-features = false, features = ["parallel"] }
 tauri-plugin-updater = "2"
+# One Convertino at a time; a second launch (another app asking for the wheel) hands its arguments over.
+tauri-plugin-single-instance = "2"
 # Free space before a folder job writes gigabytes.
 fs4 = "1"
 # Smart actions: look inside zips (and Office files) without unpacking them.

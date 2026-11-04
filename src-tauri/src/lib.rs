@@ -37,6 +37,7 @@ mod smart;
 mod sniff;
 mod shell;
 mod siblings;
+mod request;
 mod size;
 mod stats;
 mod tools;
@@ -1887,8 +1888,54 @@ pub fn cli_main() -> i32 {
     cli::main()
 }
 
+/// Another app (Dora) asked for the wheel on its files: open it like an Alt+right-click.
+fn open_requested_wheel(app: &AppHandle, req: request::WheelRequest) {
+    let started = Instant::now();
+    let app = app.clone();
+    // Reading folders and building the wheel happen off the main thread, as for Alt+right-click.
+    std::thread::spawn(move || {
+        #[cfg(target_os = "macos")]
+        let cursor = req.at.and_then(|(x, y)| mac_point_to_physical(&app, x, y));
+        #[cfg(not(target_os = "macos"))]
+        let cursor = req.at.map(|(x, y)| PhysicalPosition::new(x, y));
+        let missing: Vec<&String> = req.paths.iter().filter(|p| !std::path::Path::new(p).exists()).collect();
+        if !missing.is_empty() {
+            log::warn!("wheel from {}: {} of {} item(s) not found, e.g. {}", req.from, missing.len(), req.paths.len(), missing[0]);
+        }
+        let paths: Vec<String> = req.paths.iter().filter(|p| std::path::Path::new(p).exists()).cloned().collect();
+        let selection = if paths.is_empty() { Err(format!("{} asked for files that aren't there any more.", req.from)) } else { Ok(selection::Selection { source: req.from.clone(), paths, ..Default::default() }) };
+        open_for_selection(&app, selection, started, cursor, "wheel request");
+    });
+}
+
+/// A second launch of Convertino: its arguments come here and that copy quits.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+fn on_second_launch(app: &AppHandle, argv: Vec<String>) {
+    if let Some(req) = request::wheel_request(&argv) {
+        log::info!("wheel requested by {} for {} item(s)", req.from, req.paths.len());
+        open_requested_wheel(app, req);
+    } else if !argv.iter().any(|a| a == "--background") {
+        // Started again by hand (Start menu, desktop): show that it's already running.
+        show_settings(app, None);
+    }
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    // A wheel request from the app in front (Dora) may start a second copy that only hands over and quits: it passes
+    // on the right to come to the front, so the running Convertino's wheel takes the keyboard (Windows' focus rules).
+    #[cfg(windows)]
+    if std::env::args().any(|a| a == "--wheel") {
+        unsafe {
+            let _ = ::windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(::windows::Win32::UI::WindowsAndMessaging::ASFW_ANY);
+        }
+    }
+    let builder = tauri::Builder::default();
+    // One installed Convertino at a time: a second launch (another app asking for the wheel, or a
+    // second start by hand) hands its arguments over and quits. First, before anything else starts.
+    // Dev builds stay out of it (like the shared tools entry), so run-dev works next to the installed copy.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| on_second_launch(app, argv)));
+    builder
         // Compare streams the two videos of a pair from here (only files of an open session).
         .register_asynchronous_uri_scheme_protocol("cvmedia", |_ctx, request, responder| {
             std::thread::spawn(move || responder.respond(compare::media_response(&request)));
@@ -2065,7 +2112,13 @@ pub fn run() {
                 mac::on_click_while_ring(move |x, y| on_click_while_ring(&handle, x, y));
             }
             // The first time: Settings says hello (and shows the shortcut).
-            let background = std::env::args().any(|a| a == "--background");
+            let args: Vec<String> = std::env::args().collect();
+            let started_for_wheel = request::wheel_request(&args);
+            let background = args.iter().any(|a| a == "--background") || started_for_wheel.is_some();
+            // Started by another app's wheel request (Convertino wasn't running): open it now.
+            if let Some(req) = started_for_wheel {
+                open_requested_wheel(app.handle(), req);
+            }
             if first_run && !background {
                 show_settings(app.handle(), None);
             }

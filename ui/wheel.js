@@ -330,11 +330,13 @@ function folderHint(s) {
     return;
   }
   if (!s) {
-    const alone = f.alone ? ` · left alone: ${f.aloneWords}` : "";
-    const earlier = f.earlier ? ` · ${f.earlier} made by Convertino earlier` : "";
+    // One fact per line (title, what's inside, what's left alone), so a busy folder
+    // reads as tidy lines instead of one sentence wrapping anywhere.
     const subs = f.subfolders ? ` · ${f.subfolders} subfolder${f.subfolders === 1 ? "" : "s"}` : "";
-    const cut = f.truncated ? " · only the first 200,000 files were read" : "";
-    hintEl.innerHTML = `<span class="hs">Point at an action · ${esc(model.hubSubtitle)}${esc(subs)}${esc(earlier)}${esc(alone)}${esc(cut)}</span>` +
+    const earlier = f.earlier ? `<span class="hl hs">${esc(f.earlier)} made by Convertino earlier</span>` : "";
+    const alone = f.alone ? `<span class="hl hs">Left alone: ${esc(f.aloneWords)}</span>` : "";
+    const cut = f.truncated ? `<span class="hw">Only the first 200,000 files were read</span>` : "";
+    hintEl.innerHTML = `<span class="ht">Point at an action</span><span class="hs">${esc(model.hubSubtitle)}${esc(subs)}</span>${earlier}${alone}${cut}` +
       `<span class="hk">1–${Math.min(9, slots.length)} to pick · Shift+click for options · Esc to cancel</span>`;
     return;
   }
