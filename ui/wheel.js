@@ -50,6 +50,11 @@ const fileTile = (color, size = 28) =>
 const folderTile = (size = 34) =>
   `<svg width="${size}" height="${Math.round(size * 0.82)}" viewBox="0 0 44 36" aria-hidden="true"><path d="M2 6a3 3 0 013-3h11l4 4h19a3 3 0 013 3v21a3 3 0 01-3 3H5a3 3 0 01-3-3z" fill="#E8B84A"/><path d="M2 12h40v19a3 3 0 01-3 3H5a3 3 0 01-3-3z" fill="#F6CF65"/></svg>`;
 const isFolder = () => !!(model && model.folder);
+// Folder-style slots: everything on a folder's wheel, and on the file wheel the
+// ones that work on all the picked files together (Zip, Join clips, Fit to size).
+// Their facts (name, defaults, …) come from model.folder or model.together.
+const folderOf = () => (model && (model.folder || model.together)) || null;
+const isFolderSlot = (s) => isFolder() || !!(s && s.family === "folder" && model.together);
 const tileFor = (size) => (isFolder() ? folderTile(size ? size + 6 : 34) : fileTile(model.hubColor, size));
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
@@ -183,7 +188,7 @@ function setActive(i) {
   wheelEl.querySelectorAll("[data-i]").forEach((el) => el.classList.toggle("on", Number(el.dataset.i) === i));
   const s = slots[i];
   if (size) return sizeHint(s);
-  if (isFolder()) return folderHint(s);
+  if (isFolder() || isFolderSlot(s)) return folderHint(s);
   if (!s) {
     const skipped = model && model.skipped.length ? ` · ${model.skipped.length} item${model.skipped.length > 1 ? "s" : ""} skipped` : "";
     const smart = slots[0] && slots[0].smart && !slots[0].blocked ? ` · Enter: ${esc(slots[0].label)}` : "";
@@ -324,7 +329,7 @@ function compareHint(s) {
 const joinCheck = { words: null, pending: false, subfolders: null };
 
 function folderHint(s) {
-  const f = model.folder;
+  const f = folderOf();
   if (f.scanning !== null && f.scanning !== undefined) {
     hintEl.innerHTML = `<span class="ht">Reading ${esc(f.name)}…</span><span class="hs">${esc(f.scanning.toLocaleString())} files so far</span><span class="hk">Esc to cancel</span>`;
     return;
@@ -364,7 +369,7 @@ function folderHint(s) {
 function checkJoin() {
   if (joinCheck.pending || !tauri) return;
   joinCheck.pending = true;
-  const sub = model.folder.defaults.subfolders;
+  const sub = folderOf().defaults.subfolders;
   tauri.core.invoke("folder_join_check", { subfolders: sub }).then((r) => {
     joinCheck.words = r.words; joinCheck.subfolders = sub; joinCheck.pending = false;
     if (active >= 0 && slots[active] && slots[active].id === "folder.join-video" && !size) setActive(active);
@@ -383,14 +388,14 @@ function folderKind(id) {
 const FOLDER_OPTIONS = { compress: true, batch: true, ordered: true, sequence: true, zip: true };
 
 function folderDefaults() {
-  const d = (model.folder && model.folder.defaults) || { into: "new", subfolders: true, skipDone: true };
+  const d = (folderOf() && folderOf().defaults) || { into: "new", subfolders: true, skipDone: true };
   return { into: d.into, subfolders: d.subfolders, skipDone: d.skipDone, order: "name", fps: 24, format: "mp4", sound: false, gaps: "hold", pack: "zip", password: null, parts: null, fit: null };
 }
 
 /// How many files a slot touches with or without subfolders (the count on the ring is with the saved choice).
 function folderCount(s, subfolders) {
-  if (subfolders === model.folder.defaults.subfolders) return s.count;
-  const top = model.folder.topCounts || {};
+  if (subfolders === folderOf().defaults.subfolders) return s.count;
+  const top = folderOf().topCounts || {};
   if (!subfolders && top[s.id] !== undefined) return top[s.id];
   return s.count;
 }
@@ -404,7 +409,7 @@ const PARTS = [[0, "One file"], [18e6, "18 MB pieces (email)"], [100e6, "100 MB 
 
 function showFolderOptions(s) {
   const kind = folderKind(s.id);
-  const f = model.folder;
+  const f = folderOf();
   const o = folderDefaults();
   const q = Object.assign({}, DEFAULT_Q, (model && model.quality) || {});
   optsFor = { slot: s, folder: o, q, kind };
@@ -454,7 +459,9 @@ function folderGoLabel() {
   const { slot, folder, kind } = optsFor;
   const n = folderCount(slot, folder.subfolders);
   const verb = FOLDER_VERB[kind] || "Start";
-  const what = kind === "sequence" ? `${(slot.label.includes("GIF") || folder.format === "gif") ? "the GIF" : "the video"}` : `${n} file${n === 1 ? "" : "s"}`;
+  // Selected folders count as items ("Zip 5 items"): what's inside them is read when it starts.
+  const unit = folderOf() && folderOf().dirs ? "item" : "file";
+  const what = kind === "sequence" ? `${(slot.label.includes("GIF") || folder.format === "gif") ? "the GIF" : "the video"}` : `${n} ${unit}${n === 1 ? "" : "s"}`;
   document.getElementById("opts-go").textContent = `${verb} ${what}`;
 }
 
@@ -549,7 +556,7 @@ function choose(i, withOptions = false) {
   }
   if (s.kind === "compare") return animateOut(() => tauri && tauri.core.invoke("wheel_compare").catch((e) => console.error(e)));
   if (s.kind === "target" && COMPRESS.has(s.id)) return enterSize(s);
-  if (isFolder()) {
+  if (isFolderSlot(s)) {
     if (s.id === "folder.fit") return enterSize(s);
     if (withOptions && FOLDER_OPTIONS[folderKind(s.id)]) return showFolderOptions(s);
     return folderGo(s, folderDefaults(), null, false);
@@ -665,7 +672,7 @@ const optsKeep = document.getElementById("opts-keep");
 let optsFor = null;   // { slot, q }
 
 function showOptions(s) {
-  if (isFolder()) return showFolderOptions(s);
+  if (isFolderSlot(s)) return showFolderOptions(s);
   const q = Object.assign({}, DEFAULT_Q, (model && model.quality) || {});
   optsFor = { slot: s, q };
   document.getElementById("opts-title").textContent = s.label;
@@ -813,7 +820,7 @@ function loadPresets() {
   mine.loading = true;
   if (!tauri) return demoPresets(mine);
   const call = mine.folder
-    ? tauri.core.invoke("folder_fit_presets", { mode: mine.mode, subfolders: model.folder.defaults.subfolders })
+    ? tauri.core.invoke("folder_fit_presets", { mode: mine.mode, subfolders: folderOf().defaults.subfolders })
     : tauri.core.invoke("compress_presets", { targetId: mine.slot.id, family: mine.slot.family, together: mine.together });
   call
     .then((r) => { if (size === mine) { mine.ring = r; mine.loading = false; mine.unit = defaultUnit(r); showSizes(); } })
@@ -828,6 +835,8 @@ const UNIT = { KB: 1e3, MB: 1e6, GB: 1e9 };
 const nextUnit = (u) => (u === "KB" ? "MB" : u === "MB" ? "GB" : "KB");
 const FIT_MODES = [["folder", "Folder"], ["zip", "Zip"], ["parts", "Parts"]];
 const FIT_SAY = { folder: "A compressed copy of the folder", zip: "One zip, media shrunk just enough", parts: "An untouched zip in pieces" };
+// Picked files (not a folder): the Folder mode makes compressed copies in a new folder.
+const fitSay = (mode) => (mode === "folder" && !isFolder() ? "Compressed copies in a new folder" : FIT_SAY[mode]);
 
 function showSizes() {
   const r = size.ring;
@@ -943,7 +952,7 @@ function refreshPreview() {
     };
     if (!tauri) return got(demoPreview(bytes));
     const call = mine.folder
-      ? tauri.core.invoke("folder_fit_preview", { bytes, mode: mine.mode, subfolders: model.folder.defaults.subfolders })
+      ? tauri.core.invoke("folder_fit_preview", { bytes, mode: mine.mode, subfolders: folderOf().defaults.subfolders })
       : tauri.core.invoke("compress_preview", { targetId: mine.slot.id, family: mine.slot.family, bytes, together: mine.together, trim: null });
     call.then(got).catch(() => {});
   }, 120);
@@ -1041,7 +1050,7 @@ function sizeHint(s) {
   const title = (size.ring && size.ring.title) || model.hubTitle;
   if (size.folder) {
     const none = size.ring && !size.ring.presets.length ? " · no common size fits this folder: type one" : "";
-    const what = size.error ? size.error : `${FIT_SAY[size.mode]} · ${words(size.ring ? size.ring.total : 0)} now${none}`;
+    const what = size.error ? size.error : `${fitSay(size.mode)} · ${words(size.ring ? size.ring.total : 0)} now${none}`;
     hintEl.innerHTML = `<span class="ht">Fit ${esc(title)}</span><span class="hs">${esc(what)}</span><span class="hk">${keys.replace("compress", "start")}</span>`;
     return;
   }
@@ -1376,6 +1385,10 @@ if (tauri) {
   // ?folder: a sample folder wheel.
   const fs = (id, label, icon, count, sub, hint, detail, out) => ({ id, label, icon, hint, family: "folder", tag: null, kind: "target", count, sub, detail, out });
   // ?smart: a zip of fonts (a model Rust built), with the smart slot first.
+  // ?pdfs: three PDFs picked (a model Rust built): Zip, Merge, Fit behind More.
+  if (/pdfs/.test(location.search)) {
+    open(Object.assign({"os": "win", "accent": null, "files": [{"path": "C:\\Users\\Crofty\\Downloads\\Invoice 01.pdf", "name": "Invoice 01.pdf", "ext": "pdf", "family": "pdf", "size": 182000}, {"path": "C:\\Users\\Crofty\\Downloads\\Invoice 02.pdf", "name": "Invoice 02.pdf", "ext": "pdf", "family": "pdf", "size": 240000}, {"path": "C:\\Users\\Crofty\\Downloads\\Invoice 03.pdf", "name": "Invoice 03.pdf", "ext": "pdf", "family": "pdf", "size": 96000}], "skipped": [], "hubTitle": "3 files", "hubSubtitle": "PDF", "hubFamily": "pdf", "hubColor": "#C4262E", "main": [{"id": "pdf.jpg", "label": "JPG", "icon": "image", "hint": "One image per page · 150 DPI", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "pdf.png", "label": "PNG", "icon": "image", "hint": "Lossless image per page · 150 DPI", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "pdf.webp", "label": "WEBP", "icon": "image", "hint": "Smaller images, one per page", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "pdf.txt", "label": "TXT", "icon": "doc", "hint": "All text from every page", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "pdf.compress", "label": "Compress", "icon": "compress", "hint": "Pick a file size · pictures shrink first", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "pdf.merge", "label": "Merge", "icon": "merge", "hint": "Combine the selected PDFs in name order", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "folder.zip", "label": "Zip", "icon": "archive", "hint": "They go in as they are (they're compressed already): fast", "family": "folder", "tag": null, "kind": "target", "count": 3, "sub": "3 PDFs", "out": "→ Invoice 01.zip next to them · Shift+click: 7Z, TAR.GZ, password, parts"}, {"id": "more", "label": "More", "icon": "more", "hint": "More: Split, TIFF, Grayscale, Fit to size", "family": "pdf", "tag": null, "kind": "more", "count": 3}], "more": [{"id": "pdf.split", "label": "Split", "icon": "split", "hint": "One PDF per page", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "pdf.tiff", "label": "TIFF", "icon": "image", "hint": "One multi-page TIFF · 300 DPI", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "pdf.grayscale", "label": "Grayscale", "icon": "pdf", "hint": "Black-and-white PDF for printing", "family": "pdf", "tag": null, "kind": "target", "count": 3}, {"id": "folder.fit", "label": "Fit to size", "icon": "fit", "hint": "Make the files fit a size: compressed copies in a new folder, one zip, or a zip in parts", "family": "folder", "tag": null, "kind": "target", "count": 3, "sub": "518 KB →", "out": "Pick the size next"}, {"id": "back", "label": "Back", "icon": "back", "hint": "Back to the main ring", "family": "pdf", "tag": null, "kind": "back", "count": 3}], "ring": true, "handoffMs": 2000, "quality": {"jpg": 90, "webp": 85, "resize": 1920, "convertMax": 0, "dpi": 150, "pdfCompress": "balanced", "mp3": 320, "video": "balanced", "gifWidth": 480, "gifSeconds": 30, "image": "balanced", "tune": {"image": {"small": {}, "balanced": {}, "best": {}}, "video": {"small": {}, "balanced": {}, "best": {}}, "pdf": {"small": {}, "balanced": {}, "best": {}}}}, "presets": {"small": {"image": {"look": 70.0, "floor": 40, "png": 1, "stripGps": false}, "video": {"look": 89.0, "codec": "h265", "maxRes": 1080, "maxFps": 60, "audio": 128, "encoder": "gpu", "effort": 1, "recheck": 10}, "pdf": {"look": 70.0, "checkDpi": 110}}, "balanced": {"image": {"look": 80.0, "floor": 40, "png": 1, "stripGps": false}, "video": {"look": 93.0, "codec": "h265", "maxRes": 0, "maxFps": 0, "audio": 128, "encoder": "gpu", "effort": 1, "recheck": 10}, "pdf": {"look": 80.0, "checkDpi": 110}}, "best": {"image": {"look": 87.0, "floor": 40, "png": 2, "stripGps": false}, "video": {"look": 95.5, "codec": "h265", "maxRes": 0, "maxFps": 0, "audio": 128, "encoder": "auto", "effort": 1, "recheck": 10}, "pdf": {"look": 87.0, "checkDpi": 150}}}, "ask": null, "together": {"name": "3 PDFs", "roots": ["C:\\Users\\Crofty\\Downloads"], "files": 3, "inSubfolders": 0, "subfolders": 0, "bytes": 518000, "alone": 0, "aloneWords": "", "earlier": 0, "blank": false, "truncated": false, "scanning": null, "defaults": {"into": "new", "subfolders": true, "skipDone": true}, "sequence": null, "sound": null, "topCounts": {}, "dirs": 0}}, { quality: DEFAULT_Q, presets: {} }));
+  } else
   if (/smart/.test(location.search)) {
     open(Object.assign({"os":"win","accent":null,"files":[{"path":"C:\\Users\\Crofty\\Downloads\\Noto Sans Family.zip","name":"Noto Sans Family.zip","ext":"zip","family":"archive","size":835000}],"skipped":[],"hubTitle":"Noto Sans Family.zip","hubSubtitle":"3 fonts inside","hubFamily":"archive","hubColor":"#9A6B00","main":[{"id":"smart.fonts","label":"Install font","icon":"font","hint":"1 Noto Sans font (TTF), just for you, no admin prompt","family":"smart","tag":null,"kind":"target","count":1,"sub":"1 font","smart":true,"lines":["Straight into Windows' Fonts folder: nothing gets unzipped next to the zip","Left out: 1 duplicate · 1 web font"],"fields":[{"key":"for","kind":"radio","label":"Install for","choices":[{"value":"me","label":"Just me","sub":"No admin prompt. Most apps see these."},{"value":"all","label":"Everyone on this PC","sub":"One admin prompt. For older apps that only see fonts installed for everyone."}],"value":"me"},{"key":"keep","kind":"folder","label":"Also keep the font files in","choices":[],"value":null}],"go":"Install 1 font"},{"id":"archive.extract","label":"Extract","icon":"extract","hint":"Unpack into a folder next to the archive","family":"archive","tag":null,"kind":"target","count":1},{"id":"archive.7z","label":"7Z","icon":"archive","hint":"7-Zip · about 20% smaller","family":"archive","tag":null,"kind":"target","count":1},{"id":"archive.targz","label":"TAR.GZ","icon":"archive","hint":"For Linux and servers","family":"archive","tag":null,"kind":"target","count":1}],"more":[],"ring":true,"handoffMs":2000,"ask":null}, { quality: DEFAULT_Q, presets: {} }));
   } else

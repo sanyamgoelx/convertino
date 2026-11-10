@@ -157,10 +157,32 @@ pub struct Scan {
     pub subfolders: usize,
     /// More than MAX_FILES: not read to the end.
     pub truncated: bool,
+    /// Files picked on the file wheel rather than a folder (see `scan_selection`).
+    pub selection: Option<Picked>,
+}
+
+/// Several files (and folders) selected together: the file wheel offers what
+/// makes one result from all of them (Zip, Join clips, …) through the same
+/// plans as a folder. `Scan::roots` holds the one folder they share.
+#[derive(Debug, Clone, Default)]
+pub struct Picked {
+    /// The first selected item's name without its extension: what the result is called.
+    pub stem: String,
+    /// "4 PDFs", "5 items": titles and hints.
+    pub name: String,
+    /// Selected folders: Zip takes everything inside them (read when it starts, see `walk_selection`).
+    pub dirs: Vec<PathBuf>,
+    /// The folders were read (their files are in `items`).
+    pub walked: bool,
+    /// Every selected item sits directly in the shared folder (not search results from several).
+    pub side_by_side: bool,
+    /// What was selected, in order.
+    pub picked: Vec<PathBuf>,
 }
 
 /// Suffixes Convertino gives its results ("clip (compressed).mp4") and result folders ("Clips (mp4)").
 const RESULT_WORDS: &[&str] = &[
+    "joined", "combined",
     "compressed", "normalized", "no GPS", "720p", "trimmed", "grayscale", "edited", "extracted", "zip parts",
     "mp4", "mov", "webm", "mkv", "gif", "mp3", "wav", "flac", "aac", "ogg", "opus", "m4a", "aiff",
     "jpg", "png", "webp", "avif", "tiff", "bmp", "ico", "pdf", "docx", "odt", "md", "txt", "html", "csv", "json", "yaml", "xlsx", "tsv",
@@ -352,8 +374,11 @@ impl Scan {
         self.items.iter().filter(|i| !i.earlier).map(|i| i.bytes).sum()
     }
 
-    /// "Valorant clips", or "3 folders".
+    /// "Valorant clips", or "3 folders" ("4 PDFs" for a selection).
     pub fn name(&self) -> String {
+        if let Some(p) = &self.selection {
+            return p.name.clone();
+        }
         match self.roots.as_slice() {
             [one] => folder_name(one),
             many => format!("{} folders", many.len()),
@@ -392,6 +417,99 @@ pub fn folder_name(p: &Path) -> String {
                 _ => "Folder".into(),
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A selection on the file wheel
+
+/// The deepest folder every path is in; None when they're on different drives.
+fn shared_folder(paths: &[PathBuf]) -> Option<PathBuf> {
+    let mut common: Option<PathBuf> = None;
+    for p in paths {
+        let dir = p.parent()?.to_path_buf();
+        common = Some(match common {
+            None => dir,
+            Some(c) => {
+                let mut c = c;
+                while !dir.starts_with(&c) {
+                    c = c.parent()?.to_path_buf();
+                }
+                c
+            }
+        });
+    }
+    common.filter(|c| !c.as_os_str().is_empty())
+}
+
+/// What a selection is called: "4 PDFs", "3 videos", "5 items".
+fn selection_name(items: &[Item], dirs: usize) -> String {
+    let n = items.len() + dirs;
+    if dirs == 0 {
+        let fam = items.first().and_then(|i| i.family.clone());
+        if fam.is_some() && items.iter().all(|i| i.family == fam) {
+            return noun(fam.as_deref().unwrap_or(""), n);
+        }
+        return files_word(n);
+    }
+    format!("{n} item{}", if n == 1 { "" } else { "s" })
+}
+
+/// The selected files (and folders) as a scan, for the actions that make one
+/// result from all of them. Folders are listed but only read with `walk`
+/// (Zip reads them when it starts). None when there's nothing, or the items
+/// share no folder (different drives).
+pub fn scan_selection(paths: &[PathBuf], walk: bool, cancel: &AtomicBool) -> Option<Scan> {
+    let paths: Vec<PathBuf> = paths.iter().filter(|p| p.exists()).cloned().collect();
+    if paths.is_empty() {
+        return None;
+    }
+    let dir = shared_folder(&paths)?;
+    let side_by_side = paths.iter().all(|p| p.parent() == Some(dir.as_path()));
+    let mut out = Scan { roots: vec![dir.clone()], ..Scan::default() };
+    let mut dirs = Vec::new();
+    for p in &paths {
+        let Ok(meta) = std::fs::metadata(p) else { continue };
+        if meta.is_dir() {
+            dirs.push(p.clone());
+            continue;
+        }
+        let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        out.items.push(Item {
+            family: wheel::family_of(&ext).map(|(id, _)| id),
+            ext,
+            rel: p.strip_prefix(&dir).map(Path::to_path_buf).unwrap_or_else(|_| PathBuf::from(file_name(p))),
+            root: 0,
+            bytes: meta.len(),
+            modified: meta.modified().ok(),
+            earlier: false,
+            path: p.clone(),
+        });
+    }
+    let files_picked = out.items.clone();
+    if walk && !dirs.is_empty() {
+        let inner = scan_with(&dirs, cancel, &|_| {}, false).ok()?;
+        for mut i in inner.items {
+            i.rel = i.path.strip_prefix(&dir).map(Path::to_path_buf).unwrap_or_else(|_| i.rel.clone());
+            i.root = 0;
+            out.items.push(i);
+        }
+        out.alone.extend(inner.alone);
+        out.skipped_dirs.extend(inner.skipped_dirs);
+        out.subfolders = inner.subfolders + dirs.len();
+        out.truncated = inner.truncated;
+    }
+    out.items.sort_by(|a, b| path_cmp(&a.rel, &b.rel));
+    let stem = paths[0].file_stem().or_else(|| paths[0].file_name()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Files".into());
+    out.selection = Some(Picked { stem, name: selection_name(&files_picked, dirs.len()), walked: walk || dirs.is_empty(), dirs, side_by_side, picked: paths.clone() });
+    Some(out)
+}
+
+/// The selection with its folders read (Zip takes what's inside them).
+pub fn walk_selection(scan: &Scan, cancel: &AtomicBool) -> Result<Scan, String> {
+    match &scan.selection {
+        Some(p) if !p.walked => scan_selection(&p.picked, true, cancel).ok_or_else(|| "The selected files aren't there any more.".to_string()),
+        _ => Ok(scan.clone()),
     }
 }
 
@@ -750,12 +868,40 @@ fn into_words(into: Into, scan: &Scan, suffix: &str) -> String {
 }
 
 
-/// The name of a one-file result next to the folder ("Valorant clips.zip").
-fn one_file_words(scan: &Scan, ext: &str) -> String {
-    format!("→ {}.{ext} next to the folder", single_stem(scan))
+/// The name of a one-file result and where it goes ("→ Valorant clips.zip next to the folder").
+fn one_file_words(scan: &Scan, action: &Action, ext: &str) -> String {
+    let name = format!("{}.{ext}", result_stem(scan, action));
+    // Settings › Save in one folder wins (see base_dir).
+    if let Some(out) = crate::settings::get().output_folder() {
+        return format!("→ {name} in {}", folder_name(&out));
+    }
+    match &scan.selection {
+        Some(p) if p.side_by_side => format!("→ {name} next to them"),
+        Some(_) => format!("→ {name} in {}", folder_name(&scan.roots[0])),
+        None => format!("→ {name} next to the folder"),
+    }
+}
+
+/// What a one-file result is called: after the folder, or for a selection
+/// after its first item ("clip 1 (joined).mp4"; a zip is just "clip 1.zip").
+fn result_stem(scan: &Scan, action: &Action) -> String {
+    let Some(p) = &scan.selection else { return single_stem(scan) };
+    match action {
+        Action::JoinVideo | Action::JoinAudio => format!("{} (joined)", p.stem),
+        Action::Sheets | Action::PhotosPdf | Action::MergePdf => format!("{} (combined)", p.stem),
+        // "render_0001.png …" makes "render.mp4".
+        Action::Sequence | Action::SequenceGif => find_sequence(&scan.files(true))
+            .map(|s| s.prefix.trim_end_matches(|c: char| matches!(c, '_' | '-' | '.' | ' ')).to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| p.stem.clone()),
+        _ => p.stem.clone(),
+    }
 }
 
 fn single_stem(scan: &Scan) -> String {
+    if let Some(p) = &scan.selection {
+        return p.stem.clone();
+    }
     match scan.roots.as_slice() {
         [one] => folder_name(one),
         many => many[0].parent().map(folder_name).unwrap_or_else(|| "Folders".into()),
@@ -785,13 +931,13 @@ pub fn candidates<'a>(scan: &'a Scan, d: &Defaults, prefs: &crate::settings::Set
                 icon: "frames",
                 sub: noun("frame", frames.len()),
                 what: format!("{range} · {secs:.1} s at 24 fps{dims}{gaps}"),
-                out: one_file_words(scan, "mp4"),
+                out: one_file_words(scan, &Action::Sequence, "mp4"),
                 score: 100,
             },
         ));
         out.push((
             Action::SequenceGif,
-            Picks { files: frames.clone(), label: "Sequence → GIF".into(), icon: "gif", sub: noun("frame", frames.len()), what: "480 px wide, 15 fps".into(), out: one_file_words(scan, "gif"), score: 85 },
+            Picks { files: frames.clone(), label: "Sequence → GIF".into(), icon: "gif", sub: noun("frame", frames.len()), what: "480 px wide, 15 fps".into(), out: one_file_words(scan, &Action::SequenceGif, "gif"), score: 85 },
         ));
     }
 
@@ -829,7 +975,7 @@ pub fn candidates<'a>(scan: &'a Scan, d: &Defaults, prefs: &crate::settings::Set
                 label: "Photos → PDF".into(),
                 icon: "pdf",
                 what: "One PDF, one page per picture, in name order".into(),
-                out: one_file_words(scan, "pdf"),
+                out: one_file_words(scan, &Action::PhotosPdf, "pdf"),
                 score: if share(pictures.len(), total) >= 0.8 { 90 } else { 40 },
                 files: pictures.clone(),
             },
@@ -847,7 +993,7 @@ pub fn candidates<'a>(scan: &'a Scan, d: &Defaults, prefs: &crate::settings::Set
         };
         out.push((
             Action::MergePdf,
-            Picks { sub: noun("pdf", pdfs.len()), label: "Merge PDFs".into(), icon: "merge", what, out: one_file_words(scan, "pdf"), score: if share(pdfs.len(), total) >= 0.8 { 90 } else { 45 }, files: pdfs.clone() },
+            Picks { sub: noun("pdf", pdfs.len()), label: "Merge PDFs".into(), icon: "merge", what, out: one_file_words(scan, &Action::MergePdf, "pdf"), score: if share(pdfs.len(), total) >= 0.8 { 90 } else { 45 }, files: pdfs.clone() },
         ));
     }
 
@@ -925,7 +1071,7 @@ pub fn candidates<'a>(scan: &'a Scan, d: &Defaults, prefs: &crate::settings::Set
                 label: "Join clips".into(),
                 icon: "join",
                 what: "One video, in name order · without re-encoding when every clip matches, else matched to the first".into(),
-                out: one_file_words(scan, "mp4"),
+                out: one_file_words(scan, &Action::JoinVideo, "mp4"),
                 score: 50,
                 files: videos.clone(),
             },
@@ -940,7 +1086,7 @@ pub fn candidates<'a>(scan: &'a Scan, d: &Defaults, prefs: &crate::settings::Set
                 label: "Join audio".into(),
                 icon: "join",
                 what: "One recording, in name order".into(),
-                out: one_file_words(scan, &join_audio_ext(&audio)),
+                out: one_file_words(scan, &Action::JoinAudio, &join_audio_ext(&audio)),
                 score: if share(audio.len(), total) >= 0.8 { 66 } else { 48 },
                 files: audio.clone(),
             },
@@ -980,7 +1126,7 @@ pub fn candidates<'a>(scan: &'a Scan, d: &Defaults, prefs: &crate::settings::Set
     if tables.len() >= 2 {
         out.push((
             Action::Sheets,
-            Picks { sub: files_word(tables.len()), label: "One spreadsheet".into(), icon: "table", what: "One XLSX, a sheet per file, in name order".into(), out: one_file_words(scan, "xlsx"), score: 55, files: tables },
+            Picks { sub: files_word(tables.len()), label: "One spreadsheet".into(), icon: "table", what: "One XLSX, a sheet per file, in name order".into(), out: one_file_words(scan, &Action::Sheets, "xlsx"), score: 55, files: tables },
         ));
     }
 
@@ -1050,45 +1196,94 @@ fn slot_of(action: &Action, p: &Picks, scan: &Scan, d: &Defaults) -> Slot {
     }
 }
 
+/// "Fit to size": the files made to fit a size (the size ring comes next).
+pub fn fit_slot(scan: &Scan, subfolders: bool) -> Slot {
+    let everything = scan.everything(subfolders);
+    let bytes = everything.iter().map(|i| i.bytes).sum::<u64>();
+    Slot {
+        id: Action::Fit.id(),
+        label: "Fit to size".into(),
+        icon: "fit".into(),
+        hint: if scan.selection.is_some() {
+            "Make the files fit a size: compressed copies in a new folder, one zip, or a zip in parts".into()
+        } else {
+            "Make the folder fit a size: a compressed copy, one zip, or a zip in parts".into()
+        },
+        family: "folder".into(),
+        kind: SlotKind::Target,
+        count: everything.len(),
+        sub: Some(format!("{} →", human_size(bytes))),
+        out: Some("Pick the size next".into()),
+        ..Slot::default()
+    }
+}
+
+/// "Zip": everything in one archive. A selection's folders go in whole (read when it starts).
+pub fn zip_slot(scan: &Scan, subfolders: bool) -> Slot {
+    let everything = scan.everything(subfolders);
+    let media = everything.iter().filter(|i| is_packed_already(&i.ext)).map(|i| i.bytes).sum::<u64>();
+    let bytes = everything.iter().map(|i| i.bytes).sum::<u64>();
+    let left_out = scan.alone_words();
+    let dirs = scan.selection.as_ref().filter(|p| !p.walked).map(|p| p.dirs.len()).unwrap_or(0);
+    let all_media = bytes > 0 && media * 5 >= bytes * 4;
+    let (hint, sub, count) = match &scan.selection {
+        Some(p) => {
+            let n = everything.len() + dirs;
+            let hint = if dirs > 0 {
+                let files = everything.len();
+                let what = match files {
+                    0 => String::new(),
+                    f => format!("{} and ", files_word(f)),
+                };
+                format!("{what}{dirs} folder{} with everything inside, in one zip", if dirs == 1 { "" } else { "s" })
+            } else if all_media {
+                "They go in as they are (they're compressed already): fast".into()
+            } else {
+                "Everything selected, in one zip".into()
+            };
+            (hint, p.name.clone(), n)
+        }
+        None => (
+            if all_media { "Videos and pictures go in as they are (they're compressed already): fast".into() } else { "Everything in the folder, in one zip".into() },
+            files_word(everything.len()),
+            everything.len(),
+        ),
+    };
+    Slot {
+        id: Action::Zip.id(),
+        label: "Zip".into(),
+        icon: "archive".into(),
+        hint,
+        family: "folder".into(),
+        kind: SlotKind::Target,
+        count,
+        sub: Some(sub),
+        detail: (!left_out.is_empty()).then(|| format!("Left out: {left_out}")),
+        out: Some(format!("{} · Shift+click: 7Z, TAR.GZ, password, parts", one_file_words(scan, &Action::Zip, "zip"))),
+        ..Slot::default()
+    }
+}
+
+/// For a selection on the file wheel: the slots that make one result from
+/// several of the files (Join clips, Join audio, One spreadsheet, Sequence →
+/// video), best first. Zip and Fit to size come from `zip_slot` / `fit_slot`.
+pub fn together_slots(scan: &Scan, prefs: &crate::settings::Settings) -> Vec<Slot> {
+    let d = Defaults { subfolders: true, ..prefs.folder };
+    candidates(scan, &d, prefs)
+        .iter()
+        .filter(|(a, _)| matches!(a, Action::JoinVideo | Action::JoinAudio | Action::Sheets | Action::Sequence))
+        .map(|(a, p)| slot_of(a, p, scan, &d))
+        .collect()
+}
+
 /// The folder wheel: up to five best slots, then Fit to size and Zip, and
 /// More (the rest, plus Watch this folder).
 pub fn slots(scan: &Scan, d: &Defaults, prefs: &crate::settings::Settings) -> (Vec<Slot>, Vec<Slot>) {
     let all: Vec<Slot> = candidates(scan, d, prefs).iter().map(|(a, p)| slot_of(a, p, scan, d)).collect();
     // Zip and Fit take every visible file, earlier results too.
-    let everything = scan.everything(d.subfolders);
-    let n_all = everything.len();
-    let media = everything.iter().filter(|i| is_packed_already(&i.ext)).map(|i| i.bytes).sum::<u64>();
-    let bytes = everything.iter().map(|i| i.bytes).sum::<u64>();
-    let fit = Slot {
-        id: Action::Fit.id(),
-        label: "Fit to size".into(),
-        icon: "fit".into(),
-        hint: "Make the folder fit a size: a compressed copy, one zip, or a zip in parts".into(),
-        family: "folder".into(),
-        kind: SlotKind::Target,
-        count: n_all,
-        sub: Some(format!("{} →", human_size(bytes))),
-        out: Some("Pick the size next".into()),
-        ..Slot::default()
-    };
-    let left_out = scan.alone_words();
-    let zip = Slot {
-        id: Action::Zip.id(),
-        label: "Zip".into(),
-        icon: "archive".into(),
-        hint: if media * 5 >= bytes * 4 {
-            "Videos and pictures go in as they are (they're compressed already): fast".into()
-        } else {
-            "Everything in the folder, in one zip".into()
-        },
-        family: "folder".into(),
-        kind: SlotKind::Target,
-        count: n_all,
-        sub: Some(files_word(n_all)),
-        detail: (!left_out.is_empty()).then(|| format!("Left out: {left_out}")),
-        out: Some(format!("{} · Shift+click: 7Z, TAR.GZ, password, parts", one_file_words(scan, "zip"))),
-        ..Slot::default()
-    };
+    let n_all = scan.everything(d.subfolders).len();
+    let fit = fit_slot(scan, d.subfolders);
+    let zip = zip_slot(scan, d.subfolders);
     let watch = Slot {
         id: Action::Watch.id(),
         label: "Watch this folder…".into(),
@@ -1260,8 +1455,12 @@ fn base_dir(dir: &Path) -> PathBuf {
     }
 }
 
-/// The parent of the selected folders (where one-file results go).
+/// The parent of the selected folders (where one-file results go); for a
+/// selection of files, the folder they're in.
 fn parent_of(scan: &Scan) -> PathBuf {
+    if scan.selection.is_some() {
+        return scan.roots[0].clone();
+    }
     scan.roots[0].parent().map(Path::to_path_buf).unwrap_or_else(|| scan.roots[0].clone())
 }
 
@@ -1498,7 +1697,7 @@ pub fn plan(scan: &Scan, action: &Action, opts: &Opts, q: &Quality, prefs: &crat
             }
             let inputs: Vec<PathBuf> = ordered.iter().map(|i| i.path.clone()).collect();
             let dir = base_dir(&parent_of(scan));
-            let stem = single_stem(scan);
+            let stem = result_stem(scan, action);
             let (ext, op, title, verb) = match action {
                 Action::PhotosPdf => ("pdf".to_string(), Op::Magick { args: Vec::new(), first_frame: false }, format!("{name} → PDF"), "added"),
                 Action::MergePdf => ("pdf".to_string(), Op::PdfMerge, format!("Merge {name}"), "merged"),
@@ -1535,6 +1734,9 @@ pub fn plan(scan: &Scan, action: &Action, opts: &Opts, q: &Quality, prefs: &crat
             plan.groups.push(convert::plan_with("archive.extract", &files, q)?);
         }
         Action::Zip => {
+            if scan.selection.as_ref().is_some_and(|p| !p.walked) {
+                return Err("The selected folders weren't read yet.".into());
+            }
             plan.title = format!("Zip {name}");
             plan.verb = "added";
             let parent = parent_of(scan);
@@ -2778,6 +2980,66 @@ mod tests {
         let p = fit_preview(&data, 50 * MB, FitMode::Folder);
         assert!(!p.ok);
     }
+
+    #[test]
+    fn selection_plans_like_a_folder() {
+        let d = dir("selection");
+        let a = touch(&d, "Invoice 2.pdf", 10);
+        let b = touch(&d, "Invoice 10.pdf", 10);
+        touch(&d, "Kit/inner/a.txt", 5);
+        touch(&d, "Kit/.hidden", 5);
+        touch(&d, "not picked.pdf", 10);
+        let prefs = crate::settings::Settings::default();
+        let q = Quality::default();
+
+        let s = scan_selection(&[b.clone(), a.clone()], false, &no_cancel()).unwrap();
+        assert_eq!((s.name(), s.roots.clone(), s.items.len()), ("2 PDFs".to_string(), vec![d.clone()], 2));
+        let p = plan(&s, &Action::Zip, &Opts::default(), &q, &prefs).unwrap();
+        let st = &p.groups[0][0];
+        // Named after the first item picked, next to the files.
+        assert_eq!((st.dir.clone(), st.stem.as_str(), st.ext.as_str(), p.title.as_str()), (d.clone(), "Invoice 10", "zip", "Zip 2 PDFs"));
+        match &st.op {
+            Op::Folder(f) => match f.as_ref() {
+                FolderOp::Pack { base, list, .. } => {
+                    assert_eq!(base, &d);
+                    assert_eq!(list, &vec![PathBuf::from("Invoice 2.pdf"), PathBuf::from("Invoice 10.pdf")]);
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+
+        // A folder picked too: listed, read only when Zip starts.
+        let s = scan_selection(&[a.clone(), d.join("Kit")], false, &no_cancel()).unwrap();
+        assert_eq!((s.name(), s.items.len()), ("2 items".to_string(), 1));
+        assert!(plan(&s, &Action::Zip, &Opts::default(), &q, &prefs).is_err());
+        let w = walk_selection(&s, &no_cancel()).unwrap();
+        let p = plan(&w, &Action::Zip, &Opts::default(), &q, &prefs).unwrap();
+        let list = match &p.groups[0][0].op {
+            Op::Folder(f) => match f.as_ref() {
+                FolderOp::Pack { list, .. } => list.clone(),
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+        assert!(list.contains(&PathBuf::from("Invoice 2.pdf")) && list.contains(&PathBuf::from("Kit").join("inner").join("a.txt")), "{list:?}");
+        assert!(!list.iter().any(|x| x.to_string_lossy().contains(".hidden")), "hidden files left out like a folder's: {list:?}");
+        assert_eq!(p.groups[0][0].stem, "Invoice 2");
+
+        // Join: "<first> (joined)" so it never takes a clip's own name.
+        let c1 = touch(&d, "clip 1.mp4", 10);
+        let c2 = touch(&d, "clip 2.mp4", 10);
+        let s = scan_selection(&[c1, c2], false, &no_cancel()).unwrap();
+        let slots = together_slots(&s, &prefs);
+        assert_eq!(slots.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), vec!["folder.join-video"]);
+        let p = plan(&s, &Action::JoinVideo, &Opts::default(), &q, &prefs).unwrap();
+        assert_eq!((p.groups[0][0].stem.as_str(), p.groups[0][0].inputs.len()), ("clip 1 (joined)", 2));
+
+        // Different drives share no folder: nothing to plan together.
+        #[cfg(windows)]
+        assert!(scan_selection(&[PathBuf::from("C:\\a.pdf"), PathBuf::from("D:\\b.pdf")], false, &no_cancel()).is_none());
+    }
+
 }
 
 /// Real folder jobs with the converters (skipped when one isn't installed).
@@ -2982,6 +3244,34 @@ mod real_tests {
         assert!(o.replaced.is_empty() && o.holding.is_none());
         assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "no copy or scratch folder left behind");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn selected_files_and_a_folder_zip_next_to_them() {
+        if !have(&[Tool::SevenZip]) {
+            return;
+        }
+        let d = dir("selzip");
+        std::fs::write(d.join("Invoice 01.pdf"), b"%PDF a").unwrap();
+        std::fs::write(d.join("Invoice 02.pdf"), b"%PDF b").unwrap();
+        std::fs::write(d.join("left out.pdf"), b"%PDF c").unwrap();
+        std::fs::create_dir_all(d.join("Receipts")).unwrap();
+        std::fs::write(d.join("Receipts").join("r.txt"), b"r").unwrap();
+        let picked = vec![d.join("Invoice 01.pdf"), d.join("Invoice 02.pdf"), d.join("Receipts")];
+        let never = AtomicBool::new(false);
+        // As the job does: the folders are read when Zip starts.
+        let s = walk_selection(&scan_selection(&picked, false, &never).unwrap(), &never).unwrap();
+        let p = plan(&s, &Action::Zip, &Opts::default(), &Quality::default(), &crate::settings::Settings::default()).unwrap();
+        let o = run(engine::new_id(), &p, Arc::new(|_| {}), Arc::new(|_, _| {}));
+        let zip = d.join("Invoice 01.zip");
+        assert_eq!(o.made, vec![zip.clone()], "{:?}", o.rows);
+        let seven = tools::find(Tool::SevenZip).unwrap();
+        let listing = std::process::Command::new(&seven).args(["l", "-slt"]).arg(&zip).output().unwrap();
+        let text = String::from_utf8_lossy(&listing.stdout).replace('\\', "/");
+        for want in ["Path = Invoice 01.pdf", "Path = Invoice 02.pdf", "Path = Receipts/r.txt"] {
+            assert!(text.contains(want), "{want}: {text}");
+        }
+        assert!(!text.contains("left out"), "{text}");
     }
 
     #[test]

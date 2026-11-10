@@ -206,6 +206,10 @@ pub struct WheelModel {
     /// What the smart slot works on.
     #[serde(skip)]
     pub smart_files: Vec<String>,
+    /// Several files picked: what the slots that work on all of them together
+    /// (Zip, Join clips, Fit to size, …) need, like a folder's (see folder::scan_selection).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub together: Option<FolderView>,
 }
 
 /// What the folder wheel shows about the folder.
@@ -238,6 +242,8 @@ pub struct FolderView {
     pub sound: Option<String>,
     /// How many files each slot touches without subfolders (slot id -> count).
     pub top_counts: std::collections::BTreeMap<String, usize>,
+    /// Files picked on the file wheel (the "together" slots): folders among them.
+    pub dirs: usize,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -325,6 +331,8 @@ fn usable<'a>(targets: Vec<&'a Target>, files: &[&FileInfo]) -> Vec<&'a Target> 
     targets
         .into_iter()
         .filter(|t| !(t.multi && files.len() < 2))
+        // The editors open one file: with several picked, Edit would only show the first.
+        .filter(|t| !(opens_window(&t.id) && files.len() > 1))
         .filter(|t| t.count(files) > 0)
         .filter(|t| match (&t.ext, t.action) {
             // Converting a PNG to PNG is pointless; hide it when every file already is that format.
@@ -377,9 +385,27 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
     // files Convertino otherwise can't convert too (archive parts, LUTs).
     let picked_all: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).filter(|p| p.is_file()).collect();
     let offer = if paths.len() <= 50 { crate::smart::offer(&picked_all) } else { None };
+    // Everything selected, as a folder-like scan: Zip and the slots that make one
+    // result from several files work on it (folders inside are read when Zip starts).
+    let sel = crate::folder::scan_selection(&paths.iter().map(std::path::PathBuf::from).collect::<Vec<_>>(), false, &std::sync::atomic::AtomicBool::new(false));
     if files.is_empty() {
         if let Some(o) = &offer {
-            return Ok(smart_only(o, paths, accent, prefs));
+            let mut m = smart_only(o, paths, accent, prefs);
+            // Several files the smart slot knows (LUTs, scripts) can go in one zip too;
+            // not an archive's parts (they're a zip already).
+            if let Some(sel) = sel.filter(|sel| sel.items.len() + sel.selection.as_ref().map_or(0, |p| p.dirs.len()) >= 2 && o.id != "smart.join") {
+                let mut zip = crate::folder::zip_slot(&sel, true);
+                if m.main.iter().any(|s| s.label.eq_ignore_ascii_case("zip")) {
+                    zip.label = "One zip".into();
+                }
+                m.main.push(zip);
+                attach_together(&mut m, sel, prefs);
+            }
+            return Ok(m);
+        }
+        // Files Convertino doesn't convert (and folders) can still be zipped.
+        if let Some(sel) = sel {
+            return Ok(zip_only(sel, paths, accent, prefs));
         }
         let folders = paths.iter().filter(|p| Path::new(p).is_dir()).count();
         return Err(if paths.is_empty() {
@@ -440,9 +466,15 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         }
         (main, more)
     } else {
-        // Mixed selection: split the ring between up to 4 families.
+        // Mixed selection: split the ring between up to 4 families, after
+        // room for what works on all of them (Join clips…, Fit to size, Zip).
         let shown = &fam_ids[..fam_ids.len().min(4)];
-        let per = MAX_SLOTS / shown.len();
+        // Tagged "All" like the families' slots are tagged with theirs.
+        let mut extras: Vec<Slot> = sel.as_ref().map(|sel| together_for(sel, None, prefs).0).unwrap_or_default().into_iter().map(|x| Slot { tag: Some("All".into()), ..x }).collect();
+        while !extras.is_empty() && shown.len() + extras.len() > MAX_SLOTS {
+            extras.remove(0);
+        }
+        let per = ((MAX_SLOTS - extras.len()) / shown.len()).max(1);
         let main = shown
             .iter()
             .flat_map(|id| {
@@ -454,6 +486,7 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
                     .map(|t| slot(t, family, t.count(&fs), true, &prefs.quality))
                     .collect::<Vec<_>>()
             })
+            .chain(extras)
             .collect();
         (main, Vec::new())
     };
@@ -466,6 +499,17 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         } else {
             main.insert(0, smart_slot(o));
         }
+    }
+    if fam_ids.len() == 1 {
+        if let Some(sel) = &sel {
+            let (first, later) = together_for(sel, Some(fam_ids[0]), prefs);
+            let first: Vec<Slot> = first.into_iter().map(|z| unclash(z, &main, &more)).collect();
+            let later: Vec<Slot> = later.into_iter().map(|z| unclash(z, &main, &more)).collect();
+            place_together(&mut main, &mut more, first, later, fam_ids[0], files.len());
+        }
+    } else if let Some(i) = main.iter().position(|s| s.id == crate::folder::Action::Zip.id()) {
+        let others: Vec<Slot> = main.iter().filter(|s| s.family != "folder").cloned().collect();
+        main[i] = unclash(main[i].clone(), &others, &more);
     }
     let smart_files: Vec<String> = offer.as_ref().map(|o| o.files.iter().map(|p| p.to_string_lossy().into_owned()).collect()).unwrap_or_default();
     let picked: Vec<std::path::PathBuf> = files.iter().map(|f| std::path::PathBuf::from(&f.path)).collect();
@@ -491,7 +535,7 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         }
     }
 
-    Ok(WheelModel {
+    let mut model = WheelModel {
         os: if cfg!(target_os = "macos") { "mac" } else { "win" },
         accent,
         hub_family: if fam_ids.len() == 1 { first.id.clone() } else { "mixed".into() },
@@ -513,7 +557,163 @@ fn build_with(paths: &[String], accent: Option<String>, prefs: &Settings) -> Res
         scan: None,
         compare,
         smart_files,
-    })
+        together: None,
+    };
+    if let Some(sel) = sel {
+        if model.main.iter().chain(model.more.iter()).any(|s| s.family == "folder") {
+            attach_together(&mut model, sel, prefs);
+        }
+    }
+    Ok(model)
+}
+
+/// The slots that work on the whole selection, from its scan: `(main, later)`.
+/// `family`: the one family on the wheel (None: a mixed selection, where
+/// everything goes on the main ring). Zip is last on the main ring for two or
+/// more items, and behind More for one file (none for one archive: its ZIP
+/// slot already repacks it). Fit to size: two or more files and no folders.
+fn together_for(sel: &crate::folder::Scan, family: Option<&str>, prefs: &Settings) -> (Vec<Slot>, Vec<Slot>) {
+    let dirs = sel.selection.as_ref().map(|p| p.dirs.len()).unwrap_or(0);
+    let items = sel.items.len() + dirs;
+    let several = items >= 2;
+    let mut first: Vec<Slot> = if several { crate::folder::together_slots(sel, prefs) } else { Vec::new() };
+    let mut later = Vec::new();
+    let fit = (several && dirs == 0 && sel.items.len() >= 2).then(|| crate::folder::fit_slot(sel, true));
+    let zip = crate::folder::zip_slot(sel, true);
+    match (family, fit) {
+        // One family: its Compress ring already does "all together under a size".
+        (Some(_), Some(fit)) => later.push(fit),
+        (None, Some(fit)) => first.push(fit),
+        _ => {}
+    }
+    if several {
+        first.push(zip);
+    } else if family != Some("archive") {
+        later.push(zip);
+    }
+    (first, later)
+}
+
+/// Zip next to an archive's own ZIP slot is "One zip".
+fn unclash(mut s: Slot, main: &[Slot], more: &[Slot]) -> Slot {
+    if s.id == crate::folder::Action::Zip.id() && main.iter().chain(more.iter()).any(|x| x.kind == SlotKind::Target && x.label.eq_ignore_ascii_case("zip")) {
+        s.label = "One zip".into();
+    }
+    s
+}
+
+/// Made for several files at once (Merge): stays on the main ring.
+fn is_multi(id: &str) -> bool {
+    all_targets().any(|(_, t)| t.id == id && t.multi)
+}
+
+/// Adds `first` to the main ring after the family's slots and `later` behind
+/// More. When the main ring gets too full, the family's last slots (in the
+/// order Settings gives them) move behind More; never the smart slot,
+/// Compress, a slot made for several files, or the ones added here.
+fn place_together(main: &mut Vec<Slot>, more: &mut Vec<Slot>, first: Vec<Slot>, later: Vec<Slot>, family: &str, count: usize) {
+    if first.is_empty() && later.is_empty() {
+        return;
+    }
+    main.retain(|s| s.kind != SlotKind::More);
+    more.retain(|s| s.kind != SlotKind::Back);
+    main.extend(first);
+    // Room on the main ring and no More yet: no ring of its own for one slot.
+    let mut later = later;
+    if more.is_empty() && main.len() + later.len() <= MAX_SLOTS {
+        main.append(&mut later);
+    }
+    let movable = |s: &Slot| s.kind == SlotKind::Target && !s.smart && s.family != "folder" && !s.id.ends_with(".compress") && !is_multi(&s.id);
+    let mut moved: Vec<Slot> = Vec::new();
+    loop {
+        let needs_more = !more.is_empty() || !moved.is_empty() || !later.is_empty();
+        if main.len() + usize::from(needs_more) <= MAX_SLOTS {
+            break;
+        }
+        match main.iter().rposition(|s| movable(s)) {
+            Some(i) => moved.insert(0, main.remove(i)),
+            None => break,
+        }
+    }
+    let mut rest = moved;
+    rest.append(more);
+    rest.extend(later);
+    *more = rest;
+    if !more.is_empty() {
+        more.push(Slot { id: "back".into(), label: "Back".into(), icon: "back".into(), hint: "Back to the main ring".into(), family: family.into(), kind: SlotKind::Back, count, ..Slot::default() });
+        main.push(more_slot(more, family, count));
+    }
+}
+
+/// What the wheel's folder-style slots need: the scan (for the pick, Fit's
+/// sizes, Join's check) and the options card's facts.
+fn attach_together(m: &mut WheelModel, sel: crate::folder::Scan, prefs: &Settings) {
+    let files = sel.files(true);
+    let dirs = sel.selection.as_ref().map(|p| p.dirs.len()).unwrap_or(0);
+    let seq = crate::folder::find_sequence(&files).map(|s| SequenceView {
+        first: s.frames.first().map(|(_, p)| file_name_of(p)).unwrap_or_default(),
+        last: s.frames.last().map(|(_, p)| file_name_of(p)).unwrap_or_default(),
+        frames: s.frames.len(),
+        gaps: s.gaps.len(),
+        width: s.width,
+        height: s.height,
+    });
+    m.together = Some(FolderView {
+        name: sel.name(),
+        roots: sel.roots.iter().map(|r| r.to_string_lossy().into_owned()).collect(),
+        files: files.len(),
+        bytes: sel.bytes(),
+        // A selection has no "Include subfolders": everything picked is in.
+        defaults: crate::folder::Defaults { subfolders: true, ..prefs.folder },
+        sequence: seq,
+        sound: files.iter().find(|i| i.family.as_deref() == Some("audio")).map(|i| file_name_of(&i.path)),
+        dirs,
+        ..FolderView::default()
+    });
+    m.scan = Some(std::sync::Arc::new(sel));
+}
+
+fn noun_files(n: usize) -> String {
+    format!("{n} file{}", if n == 1 { "" } else { "s" })
+}
+
+/// Nothing Convertino converts was picked (other kinds of files, folders with
+/// files): they can still go in one zip.
+fn zip_only(sel: crate::folder::Scan, paths: &[String], accent: Option<String>, prefs: &Settings) -> WheelModel {
+    let zip = crate::folder::zip_slot(&sel, true);
+    let n = paths.len();
+    let dirs = sel.selection.as_ref().map_or(0, |p| p.dirs.len());
+    let (hub_title, hub_subtitle) = match paths {
+        [one] => (file_name_of(Path::new(one)), human_size(sel.bytes())),
+        _ if dirs > 0 => (sel.name(), format!("{} and {dirs} folder{}", noun_files(n.saturating_sub(dirs)), if dirs == 1 { "" } else { "s" })),
+        _ => (sel.name(), human_size(sel.bytes())),
+    };
+    let mut m = WheelModel {
+        os: if cfg!(target_os = "macos") { "mac" } else { "win" },
+        accent,
+        files: Vec::new(),
+        skipped: paths.iter().map(|p| file_name_of(Path::new(p))).collect(),
+        hub_title,
+        hub_subtitle,
+        hub_family: "mixed".into(),
+        hub_color: "#6B6F7A".into(),
+        main: vec![zip],
+        more: Vec::new(),
+        ring: prefs.progress_ring,
+        handoff_ms: prefs.handoff_seconds as u64 * 1000,
+        quality: prefs.quality.clone(),
+        presets: crate::tune::resolved_json(&prefs.quality.tune),
+        pending_dialog: None,
+        ask: None,
+        selected: paths.to_vec(),
+        folder: None,
+        scan: None,
+        compare: Vec::new(),
+        smart_files: Vec::new(),
+        together: None,
+    };
+    attach_together(&mut m, sel, prefs);
+    m
 }
 
 /// A wheel with only the smart slot: files Convertino can't convert, but
@@ -557,6 +757,7 @@ fn smart_only(o: &crate::smart::Offer, paths: &[String], accent: Option<String>,
         folder: None,
         scan: None,
         compare: Vec::new(),
+        together: None,
     }
 }
 
@@ -682,6 +883,7 @@ fn build_folder_with(scan: std::sync::Arc<crate::folder::Scan>, accent: Option<S
         sequence: seq,
         sound: files.iter().find(|i| i.family.as_deref() == Some("audio")).map(|i| file_name_of(&i.path)),
         top_counts,
+        dirs: 0,
     };
     let n = files.len();
     Ok(WheelModel {
@@ -706,6 +908,7 @@ fn build_folder_with(scan: std::sync::Arc<crate::folder::Scan>, accent: Option<S
         scan: Some(scan),
         compare,
         smart_files: Vec::new(),
+        together: None,
     })
 }
 
@@ -738,6 +941,7 @@ pub fn scanning_folder(roots: &[std::path::PathBuf], found: usize, accent: Optio
         scan: None,
         compare: Vec::new(),
         smart_files: Vec::new(),
+        together: None,
     }
 }
 
@@ -986,6 +1190,144 @@ pub fn resolve(word: &str, ext: &str) -> Option<Conversion> {
 mod tests {
     use super::*;
 
+    fn fresh(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("convertino-wheel-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn ids(m: &WheelModel) -> (Vec<String>, Vec<String>) {
+        (m.main.iter().map(|x| x.id.clone()).collect(), m.more.iter().map(|x| x.id.clone()).collect())
+    }
+
+    #[test]
+    fn several_pdfs_get_zip_and_keep_merge_and_compress() {
+        let d = fresh("pdfs");
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        let paths: Vec<String> = ["Invoice 03.pdf", "Invoice 01.pdf", "Invoice 02.pdf"].iter().map(|n| { std::fs::write(d.join(n), b"%PDF-1.4 x").unwrap(); s(&d.join(n)) }).collect();
+        let prefs = Settings::default();
+        let m = build_with(&paths, None, &prefs).unwrap();
+        let (main, more) = ids(&m);
+        assert!(main.len() <= MAX_SLOTS, "{main:?}");
+        for want in ["folder.zip", "pdf.merge", "pdf.compress"] {
+            assert!(main.contains(&want.to_string()), "{want} on the main ring: {main:?}");
+        }
+        // Edit opens one file: not offered for three.
+        assert!(!main.iter().chain(more.iter()).any(|x| x == "pdf.edit"), "{main:?} {more:?}");
+        let zip = m.main.iter().find(|x| x.id == "folder.zip").unwrap();
+        assert_eq!((zip.label.as_str(), zip.sub.as_deref(), zip.count, zip.family.as_str()), ("Zip", Some("3 PDFs"), 3, "folder"));
+        assert!(zip.out.as_deref().unwrap().starts_with("→ Invoice 03.zip next to them"), "{:?}", zip.out);
+        // The pick goes through the folder plans, on this selection.
+        let t = m.together.as_ref().unwrap();
+        assert_eq!((t.name.as_str(), t.files, t.dirs, t.defaults.subfolders), ("3 PDFs", 3, 0, true));
+        assert!(m.scan.is_some() && m.folder.is_none());
+        // Fit to size sits behind More (Compress already fits one kind of file together).
+        assert!(more.contains(&"folder.fit".to_string()), "{more:?}");
+        assert_eq!(m.more.last().unwrap().kind, SlotKind::Back);
+        assert_eq!(m.main.last().unwrap().kind, SlotKind::More);
+
+        // One PDF: Edit stays, Zip waits behind More.
+        let m = build_with(&paths[..1], None, &prefs).unwrap();
+        let (main, more) = ids(&m);
+        assert!(main.contains(&"pdf.edit".to_string()) && !main.contains(&"folder.zip".to_string()), "{main:?}");
+        assert!(more.contains(&"folder.zip".to_string()) && !more.contains(&"folder.fit".to_string()), "{more:?}");
+        assert!(main.len() <= MAX_SLOTS);
+    }
+
+    #[test]
+    fn every_kind_of_several_files_gets_zip_on_the_ring() {
+        let d = fresh("zip-every-kind");
+        let prefs = Settings::default();
+        for exts in [&["jpg", "png", "webp", "heic"][..], &["mp3", "wav"], &["mp4", "mov"], &["pdf", "pdf"], &["docx", "pptx"], &["csv", "json"], &["ttf", "otf"], &["cr2", "nef"], &["zip", "7z"], &["svg", "gif"], &["jpg", "mp4", "pdf", "docx"]] {
+            let paths: Vec<String> = exts.iter().enumerate().map(|(i, e)| {
+                let p = d.join(format!("f{i}.{e}"));
+                std::fs::write(&p, b"x").unwrap();
+                p.to_string_lossy().into_owned()
+            }).collect();
+            let m = build_with(&paths, None, &prefs).unwrap();
+            let main: Vec<&str> = m.main.iter().map(|x| x.id.as_str()).collect();
+            assert!(main.contains(&"folder.zip"), "{exts:?}: {main:?}");
+            assert!(main.len() <= MAX_SLOTS, "{exts:?}: {main:?}");
+            for p in &paths {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+
+    #[test]
+    fn together_slots_for_clips_mixed_files_and_archives() {
+        let d = fresh("together");
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        let w = |n: &str| { std::fs::write(d.join(n), b"x").unwrap(); s(&d.join(n)) };
+        let prefs = Settings::default();
+
+        // Clips: Join clips and Zip on the ring, Compress kept, Fit behind More.
+        let clips = vec![w("b.mp4"), w("a.mp4")];
+        let m = build_with(&clips, None, &prefs).unwrap();
+        let (main, more) = ids(&m);
+        assert!(main.len() <= MAX_SLOTS, "{main:?}");
+        for want in ["folder.join-video", "folder.zip", "video.compress", "video.webm"] {
+            assert!(main.contains(&want.to_string()), "{want}: {main:?}");
+        }
+        assert!(more.contains(&"folder.fit".to_string()), "{more:?}");
+        let join = m.main.iter().find(|x| x.id == "folder.join-video").unwrap();
+        assert!(join.out.as_deref().unwrap().contains("b (joined).mp4"), "{:?}", join.out);
+        // Every format is still somewhere on the wheel.
+        for t in ["video.gif", "video.mp3", "video.720p", "video.frames", "video.mute", "video.mov", "video.mkv", "video.wav"] {
+            assert!(main.contains(&t.to_string()) || more.contains(&t.to_string()), "{t} lost: {main:?} {more:?}");
+        }
+
+        // Kinds mixed: Fit to size and Zip on the ring with the families.
+        let mixed = vec![w("deck.pdf"), w("clip.mp4"), w("notes.txt")];
+        let m = build_with(&mixed, None, &prefs).unwrap();
+        let (main, _) = ids(&m);
+        assert!(main.len() <= MAX_SLOTS, "{main:?}");
+        assert!(main.contains(&"folder.zip".to_string()) && main.contains(&"folder.fit".to_string()), "{main:?}");
+        assert!(main.iter().any(|x| x.starts_with("pdf.")) && main.iter().any(|x| x.starts_with("video.")) && main.iter().any(|x| x.starts_with("doc.")), "{main:?}");
+
+        // Archives already have a ZIP slot (repack each): this one is "One zip".
+        let arcs = vec![w("a.7z"), w("b.7z")];
+        let m = build_with(&arcs, None, &prefs).unwrap();
+        let zip = m.main.iter().find(|x| x.id == "folder.zip").unwrap();
+        assert_eq!(zip.label, "One zip");
+        // One archive: no zip of a zip.
+        let m = build_with(&arcs[..1], None, &prefs).unwrap();
+        let (main, more) = ids(&m);
+        assert!(!main.iter().chain(more.iter()).any(|x| x == "folder.zip"), "{main:?} {more:?}");
+    }
+
+    #[test]
+    fn files_convertino_cannot_convert_and_folders_can_still_be_zipped() {
+        let d = fresh("zip-only");
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        std::fs::write(d.join("logo.psd"), b"8BPS").unwrap();
+        std::fs::write(d.join("tool.exe"), b"MZ").unwrap();
+        std::fs::create_dir_all(d.join("Assets")).unwrap();
+        std::fs::write(d.join("Assets").join("a.bin"), b"x").unwrap();
+        let prefs = Settings::default();
+
+        let m = build_with(&[s(&d.join("logo.psd")), s(&d.join("tool.exe"))], None, &prefs).unwrap();
+        assert_eq!(ids(&m).0, vec!["folder.zip".to_string()]);
+        assert_eq!((m.hub_title.as_str(), m.main[0].sub.as_deref()), ("2 files", Some("2 files")));
+        assert!(m.together.is_some() && m.scan.is_some());
+
+        // A file and a folder: the folder goes in whole, read when Zip starts.
+        let m = build_with(&[s(&d.join("logo.psd")), s(&d.join("Assets"))], None, &prefs).unwrap();
+        let zip = &m.main[0];
+        assert_eq!((zip.id.as_str(), zip.sub.as_deref(), zip.count), ("folder.zip", Some("2 items"), 2));
+        assert!(zip.hint.contains("1 file and 1 folder with everything inside"), "{}", zip.hint);
+        assert_eq!(m.together.as_ref().unwrap().dirs, 1);
+        assert_eq!(m.hub_subtitle, "1 file and 1 folder");
+
+        // A known file next to a folder: its formats, plus Zip for both.
+        std::fs::write(d.join("photo.png"), b"x").unwrap();
+        let m = build_with(&[s(&d.join("photo.png")), s(&d.join("Assets"))], None, &prefs).unwrap();
+        let zip = m.main.iter().find(|x| x.id == "folder.zip").expect("zip on the ring");
+        assert_eq!(zip.sub.as_deref(), Some("2 items"));
+        assert!(!m.main.iter().chain(m.more.iter()).any(|x| x.id == "folder.fit"), "no Fit with a folder picked");
+    }
+
     fn tmp(name: &str) -> String {
         let p = std::env::temp_dir().join(name);
         std::fs::write(&p, b"x").unwrap();
@@ -1148,8 +1490,9 @@ mod tests {
     }
 
     #[test]
-    fn unknown_file_is_an_error() {
-        assert!(build(&[tmp("z.qqq")], None).is_err());
+    fn unknown_file_can_only_be_zipped() {
+        let m = build(&[tmp("z.qqq")], None).unwrap();
+        assert_eq!(m.main.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["folder.zip"]);
         assert!(build(&[], None).is_err());
     }
 
@@ -1202,7 +1545,8 @@ mod tests {
     fn slides_only_offer_what_works() {
         let m = build(&[tmp("deck.pptx")], None).unwrap();
         let ids: Vec<_> = m.main.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, ["doc.pdf"]);
+        // Zip goes on the ring when there's room (no More ring for one slot).
+        assert_eq!(ids, ["doc.pdf", "folder.zip"]);
         let m = build(&[tmp("notes.md")], None).unwrap();
         assert!(!m.main.iter().any(|s| s.id == "doc.md"));
         assert!(m.main.iter().any(|s| s.id == "doc.docx"));
@@ -1211,3 +1555,4 @@ mod tests {
         assert_eq!(md.count, 1);
     }
 }
+

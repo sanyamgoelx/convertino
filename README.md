@@ -92,6 +92,17 @@ skipped. Hidden and system files are left alone, and every file is accounted for
 corner card's **Details** lists each one and what happened to it. **Stop after this
 file** finishes the file in progress; **Carry on** does the rest later.
 
+## Several files at once
+
+Select several files and Alt+right-click them: next to their formats the wheel offers
+what makes one result from all of them, the same as on a folder:
+
+- **Zip** them (ZIP, 7Z or TAR.GZ, a password, pieces), named after the first file and
+  saved next to them. Works for any kind of file, also ones Convertino can't convert,
+  and a selected folder goes in whole.
+- **Join clips**, **Join audio**, **One spreadsheet** and **Sequence → video** when the
+  files fit, and **Fit to size** (compressed copies, one zip, or a zip in pieces).
+
 ## PDF editor
 
 **Edit** on the PDF wheel opens an editor that saves a copy (the original is never changed):

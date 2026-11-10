@@ -568,7 +568,14 @@ pub fn start_folder_planned(
         emit(&app, "job-progress", Progress { id, fraction: 0.0, detail: "Getting ready…".into(), extra: None });
         let prefs = crate::settings::get();
         let q = quality.unwrap_or_else(|| prefs.quality.clone());
-        match crate::folder::plan(&scan, &action, &opts, &q, &prefs) {
+        // Files selected with folders: Zip takes what's inside the folders, read now.
+        let planned = if scan.selection.as_ref().is_some_and(|p| !p.walked) {
+            emit(&app, "job-progress", Progress { id, fraction: 0.0, detail: "Reading the selected folders…".into(), extra: None });
+            crate::folder::walk_selection(&scan, &std::sync::atomic::AtomicBool::new(false)).and_then(|walked| crate::folder::plan(&walked, &action, &opts, &q, &prefs))
+        } else {
+            crate::folder::plan(&scan, &action, &opts, &q, &prefs)
+        };
+        match planned {
             Ok(plan) => run_folder(&app, id, plan, ring),
             Err(e) if e.starts_with(crate::folder::ALREADY_DONE) => {
                 let body = e[crate::folder::ALREADY_DONE.len()..].to_string();
